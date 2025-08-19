@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7
+    container_name: cryptoviz_redis
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: cryptoviz_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cryptoviz}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    working_dir: /docker-entrypoint-initdb.d
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cryptoviz}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
