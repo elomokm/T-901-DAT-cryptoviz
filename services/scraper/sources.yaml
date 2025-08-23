@@ -1,0 +1,13 @@
+# Tu peux ajouter/retirer des flux ici
+sources:
+  - name: coindesk
+    type: rss
+    url: https://www.coindesk.com/arc/outboundfeeds/rss/
+  - name: cointelegraph
+    type: rss
+    url: https://cointelegraph.com/rss
+  - name: decrypt
+    type: rss
+    url: https://decrypt.co/feed
+poll_interval_seconds: 60
+
