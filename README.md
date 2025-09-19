@@ -320,3 +320,34 @@ docker compose exec postgres psql -U postgres -d cryptoviz -c \
 ## 12) Licence
 
 Projet interne/étudiant. Définir une licence si publication.
+
+
+
+##### RUN LE PROJET
+# 1. Démarrer Colima (ou lancer Docker Desktop)
+colima start --cpu 4 --memory 8 --arch x86_64
+
+# 2. Vérifier le contexte Docker
+docker context use colima   # ou "default" si Docker Desktop
+docker info
+
+# 3. Aller dans le dossier infra du projet
+cd /chemin/vers/projet/infra
+
+# 4. Builder et lancer
+docker compose up --build
+Backend : http://127.0.0.1:8000
+
+Frontend : http://127.0.0.1:3000
+
+Stopper : docker compose down
+
+
+
+
+
+
+
+## Les plus performant 
+## les moins performant
+## Chart Graphique de la plus belle performance de la semaine
