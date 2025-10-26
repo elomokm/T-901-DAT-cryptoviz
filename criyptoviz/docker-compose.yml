@@ -1,0 +1,361 @@
+
+
+networks:
+  cryptoviz_net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  kafka_data:
+  zookeeper_data:
+
+services:
+
+  # ================== DATABASE (TimescaleDB) ==================
+  postgres:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: cv_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - cryptoviz_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  adminer:
+    image: adminer:4
+    container_name: cv_adminer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks:
+      - cryptoviz_net
+
+  # ================== KAFKA STACK ==================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: cv_zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - cryptoviz_net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: cv_kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"   # accès depuis l'hôte
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID:-1}
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-1}
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"   # simple pour démarrer (sinon mettre "false" et utiliser topics-init)
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-6}
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - cryptoviz_net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:29092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: cv_kafka_ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cryptoviz
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - cryptoviz_net
+
+  # (Optionnel) Si tu veux des topics déterministes: décommente ce bloc et passe AUTO_CREATE=false
+  # topics-init:
+  #   image: bitnami/kafka:3.6
+  #   container_name: cv_topics_init
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   entrypoint: ["/bin/bash","/opt/topics-init.sh"]
+  #   volumes:
+  #     - ./configs/kafka-topics-init.sh:/opt/topics-init.sh:ro
+  #   networks:
+  #     - cryptoviz_net
+
+  # ================== SPARK ==================
+  spark-master:
+    image: bitnami/spark:3.5
+    container_name: cv_spark_master
+    environment:
+      SPARK_MODE: master
+      SPARK_MASTER_HOST: spark-master
+    ports:
+      - "7077:7077"
+      - "8082:8080"   # UI Spark master
+    networks:
+      - cryptoviz_net
+
+  spark-worker:
+    image: bitnami/spark:3.5
+    container_name: cv_spark_worker
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: 2      # au lieu de 4
+      SPARK_WORKER_MEMORY: 2g    # au lieu de 1g implicite
+    depends_on:
+      - spark-master
+    networks:
+      - cryptoviz_net
+
+
+  spark-aggregator:
+    build:
+      context: .
+      dockerfile: services/spark_aggregator/Dockerfile
+    container_name: cv_spark_agg_1m
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.normalized.trade
+      OUTPUT_TOPIC: market.agg.ohlcv.1m
+      WATERMARK: 30 seconds
+      WINDOW_SIZE: 1 minute
+    networks:
+      - cryptoviz_net
+    command: [
+      "/opt/bitnami/spark/bin/spark-submit",
+      "--master","spark://spark-master:7077",
+      "--packages","org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+      "--conf","spark.sql.shuffle.partitions=6",
+      "--conf","spark.default.parallelism=2",
+      "--conf","spark.executor.instances=1",
+      "--conf","spark.executor.cores=2",
+      "--conf","spark.executor.memory=1g",
+      "--conf","spark.driver.memory=1g",
+      "--conf","spark.driver.maxResultSize=512m",
+      "--conf","spark.sql.streaming.checkpointLocation=/tmp/checkpoints/cv_ohlcv_1m",
+      "/app/stream_ohlcv_1m.py"
+    ]
+
+  spark-aggregator-5m:
+    build:
+      context: .
+      dockerfile: services/spark_aggregator/Dockerfile
+    container_name: cv_spark_agg_5m
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.normalized.trade
+      OUTPUT_TOPIC: market.agg.ohlcv.5m
+      WATERMARK: 45 seconds
+      WINDOW_SIZE: 5 minutes
+    networks:
+      - cryptoviz_net
+    command: [
+      "/opt/bitnami/spark/bin/spark-submit",
+      "--master","spark://spark-master:7077",
+      "--packages","org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+      "--conf","spark.sql.shuffle.partitions=6",
+      "--conf","spark.default.parallelism=2",
+      "--conf","spark.executor.instances=1",
+      "--conf","spark.executor.cores=2",
+      "--conf","spark.executor.memory=1g",
+      "--conf","spark.driver.memory=1g",
+      "--conf","spark.driver.maxResultSize=512m",
+      "--conf","spark.sql.streaming.checkpointLocation=/tmp/checkpoints/cv_ohlcv_5m",
+      "/app/stream_ohlcv_5m.py"
+    ]
+
+  spark-aggregator-1h:
+    build:
+      context: .
+      dockerfile: services/spark_aggregator/Dockerfile
+    container_name: cv_spark_agg_1h
+    depends_on:
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.normalized.trade
+      OUTPUT_TOPIC: market.agg.ohlcv.1h
+      WATERMARK: 2 minutes
+      WINDOW_SIZE: 1 hour
+    networks:
+      - cryptoviz_net
+    command: [
+      "/opt/bitnami/spark/bin/spark-submit",
+      "--master","spark://spark-master:7077",
+      "--packages","org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
+      "--conf","spark.sql.shuffle.partitions=6",
+      "--conf","spark.default.parallelism=2",
+      "--conf","spark.executor.instances=1",
+      "--conf","spark.executor.cores=2",
+      "--conf","spark.executor.memory=1g",
+      "--conf","spark.driver.memory=1g",
+      "--conf","spark.driver.maxResultSize=512m",
+      "--conf","spark.sql.streaming.checkpointLocation=/tmp/checkpoints/cv_ohlcv_1h",
+      "/app/stream_ohlcv_1h.py"
+    ]
+
+  # ================== SERVICES ==================
+  scraper-kraken:
+    build:
+      context: .
+      dockerfile: services/scraper_kraken/Dockerfile
+    container_name: cv_scraper_kraken
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      OUTPUT_TOPIC: market.raw.trade.kraken
+      # 10 paires en USDT (attention: BTC = XBT chez Kraken)
+      KRAKEN_PAIRS_CSV: XBT/USDT,ETH/USDT,SOL/USDT,XRP/USDT,ADA/USDT,DOGE/USDT,AVAX/USDT,LINK/USDT,MATIC/USDT,LTC/USDT
+    networks:
+      - cryptoviz_net
+
+  normalizer-market:
+    build:
+      context: .
+      dockerfile: services/normalizer_market/Dockerfile
+    container_name: cv_normalizer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPICS: market.raw.trade.coinbase,market.raw.trade.kraken
+      OUTPUT_TOPIC: market.normalized.trade
+      PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    networks:
+      - cryptoviz_net
+
+  writer-timeseries:
+    build:
+      context: .
+      dockerfile: services/writer_timeseries/Dockerfile
+    container_name: cv_writer_timeseries
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.agg.ohlcv.1m
+      PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    networks:
+      - cryptoviz_net
+
+  writer-timeseries-5m:
+    build:
+      context: .
+      dockerfile: services/writer_timeseries/Dockerfile
+    container_name: cv_writer_timeseries_5m
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.agg.ohlcv.5m
+      PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      TARGET_TABLE: candles_5m
+    networks:
+      - cryptoviz_net
+
+  writer-timeseries-1h:
+    build:
+      context: .
+      dockerfile: services/writer_timeseries/Dockerfile
+    container_name: cv_writer_timeseries_1h
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      INPUT_TOPIC: market.agg.ohlcv.1h
+      PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      TARGET_TABLE: candles_1h
+    networks:
+      - cryptoviz_net
+
+
+  scraper-coinbase:
+    build:
+      context: .
+      dockerfile: services/scraper_coinbase/Dockerfile
+    container_name: cv_scraper_coinbase
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      OUTPUT_TOPIC: market.raw.trade.coinbase
+      # 10 paires USD : cohérent avec ton registry seed
+      PRODUCT_IDS_CSV: BTC-USD,ETH-USD,SOL-USD,XRP-USD,ADA-USD,DOGE-USD,AVAX-USD,LINK-USD,MATIC-USD,LTC-USD
+    networks:
+      - cryptoviz_net
+

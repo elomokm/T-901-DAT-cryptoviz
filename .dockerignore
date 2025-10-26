@@ -1,0 +1,9 @@
+.git
+__pycache__/
+*.pyc
+.env
+sql/*.backup
+**/.ipynb_checkpoints
+node_modules
+data/
+logs/
