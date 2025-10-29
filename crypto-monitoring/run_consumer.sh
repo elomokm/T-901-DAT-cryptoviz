@@ -5,12 +5,12 @@ source /Users/elomokoumassoun/Epitech/T-901-DAT-cryptoviz/crypto-monitoring/.ven
 
 
 # Variables Kafka/Influx
-export KAFKA_STARTING_OFFSETS=latest          # ou earliest si tu veux relire tout
-export KAFKA_MAX_OFFSETS_PER_TRIGGER=100      # force plusieurs micro-batches
+export KAFKA_STARTING_OFFSETS=earliest          # ou earliest si tu veux relire tout
+export KAFKA_MAX_OFFSETS_PER_TRIGGER=10      # force plusieurs micro-batches
 export SPARK_CHECKPOINT_DIR=./checkpoints/crypto_consumer
 
 export INFLUX_URL=http://localhost:8086
-export INFLUX_TOKEN=jrM1t2xEEm5LDBfy27OXQoWVxau0mUZ_EpzBxiJNY2VJWVlg6NFLXkYqYHCD7Dqmlp9OA4Jv4LTluYCkphR_jA==
+export INFLUX_TOKEN=Y_Fn0YsUAnSnyikigehkC6WzFWa4shZkVwhM0U5KKbtb43E1y_A6QpyzKv-VYgPcYHLZctOeegOsDYmFGaYkQQ==
 export INFLUX_ORG=crypto-org
 export INFLUX_BUCKET=crypto-data
 

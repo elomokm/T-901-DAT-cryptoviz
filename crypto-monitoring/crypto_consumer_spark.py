@@ -6,6 +6,8 @@ from typing import Optional
 
 # InfluxDB v2 client (installed via requirements.txt)
 from influxdb_client import InfluxDBClient, Point, WriteOptions
+from influxdb_client.client.write_api import SYNCHRONOUS
+from pyspark.sql.streaming import StreamingQueryListener
 
 # 1. Définition du schéma des messages JSON envoyés par le producer
 crypto_schema = StructType([
@@ -29,10 +31,13 @@ def main():
 
     spark.sparkContext.setLogLevel("WARN")
 
+    # Note: StreamingQueryListener skip pour éviter erreur onQueryIdle sur Spark 3.5
+    # On s'appuie sur les logs de foreachBatch pour le debug
+
     # 3. Lecture du topic Kafka en streaming
     #    - subscribe = "crypto-prices"
-    #    - startingOffsets = "latest": on lit à partir de maintenant
-    starting_offsets = os.getenv("KAFKA_STARTING_OFFSETS", "latest")
+    #    - startingOffsets = "earliest": on lit à partir de maintenant
+    starting_offsets = os.getenv("KAFKA_STARTING_OFFSETS", "earliest")
 
     max_offsets = os.getenv("KAFKA_MAX_OFFSETS_PER_TRIGGER", "100")
 
@@ -44,6 +49,7 @@ def main():
         .option("startingOffsets", starting_offsets)
         .option("maxOffsetsPerTrigger", max_offsets)
         .option("failOnDataLoss", "false")
+        .option("kafka.group.id", "crypto-spark-consumer")  # ← AJOUTEZ CETTE LIGNE
         .load()
     )
 
@@ -89,7 +95,7 @@ def main():
 
     # 6. Ecriture dans InfluxDB (foreachBatch) + logs console
     INFLUX_URL = os.getenv("INFLUX_URL", "http://localhost:8086")
-    INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "my-super-secret-auth-token")
+    INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "Y_Fn0YsUAnSnyikigehkC6WzFWa4shZkVwhM0U5KKbtb43E1y_A6QpyzKv-VYgPcYHLZctOeegOsDYmFGaYkQQ==")
     INFLUX_ORG = os.getenv("INFLUX_ORG", "crypto-org")
     INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "crypto-data")
     INFLUX_BATCH_SIZE = int(os.getenv("INFLUX_BATCH_SIZE", "5"))
@@ -133,13 +139,14 @@ def main():
         except Exception as diag_err:
             print(f"[diag] Batch {epoch_id} diagnostics failed: {diag_err}")
 
-        # Création du client pour ce micro-batch
+        # Création du client pour ce micro-batch (mode SYNCHRONOUS pour remonter les erreurs)
         client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         write_api = client.write_api(write_options=WriteOptions(
             batch_size=INFLUX_BATCH_SIZE,
             flush_interval=INFLUX_FLUSH_INTERVAL_MS,
             jitter_interval=0,
             retry_interval=1000,
+            write_type=SYNCHRONOUS,
         ))
 
         points = []
@@ -160,17 +167,27 @@ def main():
             points.append(p)
             count += 1
 
-            # Ecrit par paquets pour limiter la mémoire locale
+            # Ecrit par paquets pour limiter la mémoire locale (erreurs levées en mode SYNCHRONOUS)
             if len(points) >= max(1000, INFLUX_BATCH_SIZE):
-                write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+                try:
+                    write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+                except Exception as werr:
+                    print(f"[influxdb] write error (batch partial): {werr}")
+                    raise
                 points = []
 
         if points:
-            write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+            try:
+                write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
+            except Exception as werr:
+                print(f"[influxdb] write error (final chunk): {werr}")
+                raise
 
-        write_api.flush()
-        client.close()
-        print(f"Batch {epoch_id}: écrit {count} points dans InfluxDB")
+        try:
+            write_api.flush()
+        finally:
+            client.close()
+        print(f"Batch {epoch_id}: écrit {count} points dans InfluxDB (org={INFLUX_ORG}, bucket={INFLUX_BUCKET})")
 
     checkpoint_dir = os.getenv("SPARK_CHECKPOINT_DIR", "./checkpoints/crypto_consumer")
 

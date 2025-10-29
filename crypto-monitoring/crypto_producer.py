@@ -27,7 +27,9 @@ KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'crypto-prices')
 API_URL = 'https://api.coingecko.com/api/v3/simple/price'
 
 # Latency tuning via env vars
-ACKS = os.getenv('PRODUCER_ACKS', '1')  # '0' fastest, '1' default, 'all' safest
+ACKS_STR = os.getenv('PRODUCER_ACKS', '1')  # '0', '1', or 'all'
+# Convert to proper type: '0'/'1' -> int, 'all' -> 'all'
+ACKS = ACKS_STR if ACKS_STR == 'all' else int(ACKS_STR)
 LINGER_MS = int(os.getenv('PRODUCER_LINGER_MS', '0'))  # 0 = send immediately
 BATCH_SIZE = int(os.getenv('PRODUCER_BATCH_SIZE', '16384'))  # bytes; smaller can reduce latency
 COMPRESSION = os.getenv('PRODUCER_COMPRESSION', '') or None  # '', 'snappy', 'lz4', 'gzip'
@@ -65,9 +67,13 @@ def create_producer():
             linger_ms=LINGER_MS,
             batch_size=BATCH_SIZE,
             compression_type=COMPRESSION,
-            retries=0,
-            max_in_flight_requests_per_connection=5,
-            request_timeout_ms=10000,
+            retries=3,  # Retry sur échec
+            max_in_flight_requests_per_connection=1,  # Mode strict: 1 requête à la fois
+            request_timeout_ms=60000,  # 60s pour laisser plus de temps
+            api_version_auto_timeout_ms=15000,  # détection version broker
+            # Augmente les buffers pour éviter blocages
+            buffer_memory=33554432,  # 32MB
+            max_block_ms=60000,  # attend max 60s si buffer plein
         )
         print(" Producer Kafka connecté avec succès!")
         return producer
@@ -180,17 +186,40 @@ def main():
                 # 5. Il y a du nouveau -> on publie dans Kafka
                 last_snapshot = current_snapshot
 
+                print(f" Envoi de {len(enriched_records)} messages à Kafka...")
+                send_start = time.time()
+                
+                futures = []
                 for record in enriched_records:
-                    producer.send(KAFKA_TOPIC, value=record)
-                    message_count += 1
+                    # Envoie asynchrone, on stocke la future
+                    future = producer.send(KAFKA_TOPIC, value=record)
+                    futures.append((record, future))
+                
+                send_elapsed = time.time() - send_start
+                print(f"   → {len(futures)} send() calls took {send_elapsed:.3f}s")
 
-                    print(
-                        f" [{record['timestamp']}] {record['crypto'].upper()}: "
-                        f"${record['price_usd']:.2f} "
-                        f"({record['change_24h']:+.2f}%)"
-                    )
+                # Force l'envoi de tout ce qui est en buffer
+                flush_start = time.time()
+                print(f"   → Calling flush(timeout=60)...")
+                producer.flush(timeout=60)
+                flush_elapsed = time.time() - flush_start
+                print(f"   → Flush took {flush_elapsed:.3f}s")
+                
+                # Maintenant on peut vérifier les résultats
+                for record, future in futures:
+                    try:
+                        # La future devrait être déjà résolue après le flush
+                        record_metadata = future.get(timeout=1)
+                        message_count += 1
+                        print(
+                            f" [{record['timestamp']}] {record['crypto'].upper()}: "
+                            f"${record['price_usd']:.2f} "
+                            f"({record['change_24h']:+.2f}%) → partition={record_metadata.partition} offset={record_metadata.offset}"
+                        )
+                    except Exception as send_err:
+                        print(f" ERREUR confirmation {record['crypto']}: {send_err}")
 
-                print(f" {len(enriched_records)} messages envoyés (Total: {message_count})")
+                print(f" {message_count} messages confirmés (Total: {message_count})")
 
             else:
                 print("  Aucune donnée récupérée, nouvelle tentative...")
@@ -205,7 +234,10 @@ def main():
         print(f" Total de messages envoyés: {message_count}")
 
     except Exception as e:
-        print(f" Erreur inattendue: {e}")
+        import traceback
+        print(f" Erreur inattendue: {type(e).__name__}: {e}")
+        print("\n Stacktrace complète:")
+        traceback.print_exc()
 
     finally:
         if producer:

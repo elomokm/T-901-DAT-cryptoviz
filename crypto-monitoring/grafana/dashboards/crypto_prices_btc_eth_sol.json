@@ -1,0 +1,92 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "-- Grafana --",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1657023871204,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "BTC price_usd",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-crypto" },
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto == \"bitcoin\")\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")",
+          "refId": "A",
+          "queryType": "flux"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "ETH price_usd",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-crypto" },
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto == \"ethereum\")\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")",
+          "refId": "A",
+          "queryType": "flux"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SOL price_usd",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-crypto" },
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto == \"solana\")\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")",
+          "refId": "A",
+          "queryType": "flux"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["crypto"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ],
+    "time_options": [
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "7d"
+    ]
+  },
+  "timezone": "",
+  "title": "Crypto Prices (BTC / ETH / SOL)",
+  "uid": "crypto-btc-eth-sol"
+}
