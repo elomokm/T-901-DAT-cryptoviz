@@ -1,8 +1,5 @@
 apiVersion: 1
 
-# Provision InfluxDB 2.x datasource using environment variables
-# INFLUX_URL, INFLUX_ORG, INFLUX_TOKEN are passed to the Grafana container via docker-compose
-
 datasources:
   - name: InfluxDB-crypto
     uid: influxdb-crypto
