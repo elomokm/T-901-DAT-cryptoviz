@@ -31,7 +31,7 @@ Ce document résume l’essentiel depuis le dernier commit et fixe la suite imm�
 ## Décision produit validée
 
 - Option retenue: Option A – Front Next.js + API FastAPI + InfluxDB/Kafka
-- Périmètre cryptos (5) pour l’app: `bitcoin`, `ethereum`, `solana`, `binancecoin`, `ripple`
+- Périmètre cryptos (5) pour l’app: `bitcoin`, `cardano`, `ethereum`, `polkadot`, `solana`
 
 ## Prochaines étapes (immédiates)
 

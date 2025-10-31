@@ -130,8 +130,8 @@
         "multi": true,
         "includeAll": true,
         "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"crypto-data\", tag: \"crypto\", predicate: (r) => r._measurement == \"crypto_price\", start: -90d)",
-        "regex": "^(?!test_)(?!None$).*$",
-        "allValue": ".*",
+        "regex": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
+        "allValue": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
         "sort": 1
       }
     ]
