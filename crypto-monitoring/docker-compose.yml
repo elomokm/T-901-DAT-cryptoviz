@@ -58,6 +58,9 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       # Variables pour la provisioning Influx (utilisées dans datasource.yml)
       INFLUX_URL: http://influxdb:8086
       INFLUX_ORG: crypto-org

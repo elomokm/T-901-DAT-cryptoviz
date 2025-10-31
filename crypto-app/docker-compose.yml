@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./api
+    container_name: crypto_api
+    environment:
+      # InfluxDB (reuses the existing InfluxDB exposed on localhost:8086)
+      INFLUX_URL: ${INFLUX_URL:-http://host.docker.internal:8086}
+      INFLUX_ORG: ${INFLUX_ORG:-crypto-org}
+      INFLUX_BUCKET: ${INFLUX_BUCKET:-crypto-data}
+      INFLUX_TOKEN: ${INFLUX_TOKEN:-jrM1t2xEEm5LDBfy27OXQoWVxau0mUZ_EpzBxiJNY2VJWVlg6NFLXkYqYHCD7Dqmlp9OA4Jv4LTluYCkphR_jA==}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
+      DEFAULT_CRYPTOS: ${DEFAULT_CRYPTOS:-bitcoin,cardano,ethereum,polkadot,solana}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    container_name: crypto_web
+    environment:
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+      NEXT_PUBLIC_GRAFANA_URL: ${NEXT_PUBLIC_GRAFANA_URL:-http://localhost:3000}
+    ports:
+      - "3001:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
