@@ -104,12 +104,12 @@ docker-compose up -d kafka zookeeper influxdb grafana
 
 ```bash
 # Terminal 1 : CoinGecko Agent (20 cryptos toutes les 60s)
-python run_coingecko_agent.py
+python agent/coingecko_agent.py
 
 # Terminal 2 : CoinMarketCap Agent (validation croisée, 120s)
 python run_coinmarketcap_agent.py
 
-# Terminal 3 : Spark Consumer Prices (Kafka → InfluxDB - données brutes)
+# Terminal 3 : Spark Consumer Prices (Kafka → InfluxDB - données brutes)( optionel)
 python consumer_prices.py
 
 # Terminal 4 : Spark Consumer Validation (validation croisée automatique)
@@ -194,7 +194,7 @@ crypto-monitoring/
 - ATH/ATL avec dates et % changement
 - Circulating/Total/Max Supply
 
-### 2. FearGreedAgent ✅
+### 2. FearGreedAgent 
 **Source** : Alternative.me API  
 **Topic Kafka** : `crypto-market-sentiment`  
 **Fréquence** : 300s (5 min)  

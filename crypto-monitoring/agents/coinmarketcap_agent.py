@@ -154,7 +154,7 @@ class CoinMarketCapAgent(BaseAgent):
         is_anomaly = variation > 30.0
         
         if is_anomaly:
-            print(f"⚠️  [{self.name}] ANOMALIE {symbol}: {last_price:.2f} → {current_price:.2f} ({variation:.1f}%)")
+            print(f"  [{self.name}] ANOMALIE {symbol}: {last_price:.2f} → {current_price:.2f} ({variation:.1f}%)")
         
         # Mise à jour du cache
         self.last_prices[symbol] = current_price
@@ -200,12 +200,12 @@ class CoinMarketCapAgent(BaseAgent):
         while True:
             try:
                 iteration += 1
-                print(f"\n📊 [{self.name}] Itération #{iteration} - {datetime.now().strftime('%H:%M:%S')}")
+                print(f"\n [{self.name}] Itération #{iteration} - {datetime.now().strftime('%H:%M:%S')}")
                 
                 # Étape 1 : Récupération des données
                 raw_data = self.fetch_data()
                 if not raw_data:
-                    print(f"⏭️  [{self.name}] Aucune donnée, nouvelle tentative dans {self.poll_interval}s")
+                    print(f"  [{self.name}] Aucune donnée, nouvelle tentative dans {self.poll_interval}s")
                     time.sleep(self.poll_interval)
                     continue
                 
@@ -222,10 +222,10 @@ class CoinMarketCapAgent(BaseAgent):
                 time.sleep(self.poll_interval)
                 
             except KeyboardInterrupt:
-                print(f"\n🛑 [{self.name}] Arrêt demandé par l'utilisateur")
+                print(f"\n [{self.name}] Arrêt demandé par l'utilisateur")
                 break
             except Exception as e:
-                print(f"❌ [{self.name}] Erreur dans la boucle: {e}")
+                print(f" [{self.name}] Erreur dans la boucle: {e}")
                 time.sleep(self.poll_interval)
         
         # Nettoyage
