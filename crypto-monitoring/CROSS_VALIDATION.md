@@ -53,9 +53,9 @@ L'agent **CoinMarketCap** sert de source alternative pour valider les données d
 3. Copiez votre clé API
 
 **Plan Gratuit:**
-- ✅ 10,000 appels/mois
-- ✅ Top 100 cryptos
-- ✅ Données en temps réel
+- 10,000 appels/mois
+- Top 100 cryptos
+- Données en temps réel
 
 ### 2. Configurer le `.env`
 
@@ -98,8 +98,7 @@ python cross_validation.py 60
 ------------------------------------------------------------------
 [coingecko     ] BTC    = $   100,234.56
 [coinmarketcap ] BTC    = $   100,189.12
-
-✅ BTC - Divergence: 0.05%
+ BTC - Divergence: 0.05%
    CoinGecko     : $100,234.56
    CoinMarketCap : $100,189.12
    Différence    : $45.44

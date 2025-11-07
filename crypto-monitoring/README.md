@@ -109,13 +109,16 @@ python run_coingecko_agent.py
 # Terminal 2 : CoinMarketCap Agent (validation croisée, 120s)
 python run_coinmarketcap_agent.py
 
-# Terminal 3 : Spark Consumer (Kafka → InfluxDB)
+# Terminal 3 : Spark Consumer Prices (Kafka → InfluxDB - données brutes)
 python consumer_prices.py
 
-# Terminal 4 (optionnel) : Fear & Greed Agent
-python run_fear_greed_agent.py
+# Terminal 4 : Spark Consumer Validation (validation croisée automatique)
+python consumer_validation.py
 
-# Terminal 5 (optionnel) : Validation croisée
+# Terminal 5 (optionnel) : Monitor DLQ (anomalies en temps réel)
+python monitor_dlq.py
+
+# Terminal 6 (optionnel) : Validation manuelle (debug)
 python cross_validation.py 60
 ```
 
