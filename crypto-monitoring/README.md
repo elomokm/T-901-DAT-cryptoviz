@@ -5,17 +5,55 @@ Pipeline de collecte et analyse de données crypto en temps réel avec architect
 ## 📊 Architecture
 
 ```
-CoinGecko API ──┐
-Fear & Greed ───┼──> Agents ──> Kafka ──> Spark Consumer ──> InfluxDB ──> Grafana
-Binance WS ─────┘
+┌─────────────────┐      ┌─────────────────┐
+│  CoinGecko API  │      │CoinMarketCap API│
+│   60s polling   │      │  120s polling   │
+└────────┬────────┘      └────────┬────────┘
+         │                        │
+         ▼                        ▼
+┌─────────────────┐      ┌─────────────────┐
+│ CoinGecko Agent │      │ CoinMarketCap   │
+│                 │      │     Agent       │
+└────────┬────────┘      └────────┬────────┘
+         │                        │
+         └───────┬────────────────┘
+                 │
+                 ▼
+         ┌───────────────┐
+         │ crypto-prices │  ← Kafka Topic
+         │  + validation │
+         └───────┬───────┘
+                 │
+                 ▼
+         ┌───────────────┐
+         │ Spark Consumer│
+         │  + Validation │
+         └───────┬───────┘
+                 │
+                 ▼
+         ┌───────────────┐
+         │   InfluxDB    │  ← Time-series DB
+         └───────┬───────┘
+                 │
+                 ▼
+         ┌───────────────┐
+         │    Grafana    │  ← Dashboards
+         └───────────────┘
 ```
 
 ### Stack Technique
-- **Collecte** : Python Agents (multi-sources)
+- **Collecte** : Python Agents (CoinGecko, CoinMarketCap, Fear & Greed)
 - **Message Broker** : Apache Kafka
 - **Traitement** : Spark Structured Streaming  
 - **Stockage** : InfluxDB (time-series)
 - **Visualisation** : Grafana
+
+### Agents Disponibles
+- ✅ **CoinGeckoAgent** : 20 cryptos, prix + metadata (60s)
+- ✅ **CoinMarketCapAgent** : Validation croisée + anomalies (120s)
+- ✅ **FearGreedAgent** : Sentiment du marché (300s)
+- ⏳ **BinanceWebSocketAgent** : Temps réel (à venir)
+- ⏳ **NewsScraperAgent** : Actualités crypto (à venir)
 
 ---
 
@@ -66,13 +104,19 @@ docker-compose up -d kafka zookeeper influxdb grafana
 
 ```bash
 # Terminal 1 : CoinGecko Agent (20 cryptos toutes les 60s)
-python3 -m agents.coingecko_agent
+python run_coingecko_agent.py
 
-# Terminal 2 : Spark Consumer (Kafka → InfluxDB)
-python3 consumer_prices.py
+# Terminal 2 : CoinMarketCap Agent (validation croisée, 120s)
+python run_coinmarketcap_agent.py
 
-# Terminal 3 (optionnel) : Fear & Greed Agent
-python3 -m agents.fear_greed_agent
+# Terminal 3 : Spark Consumer (Kafka → InfluxDB)
+python consumer_prices.py
+
+# Terminal 4 (optionnel) : Fear & Greed Agent
+python run_fear_greed_agent.py
+
+# Terminal 5 (optionnel) : Validation croisée
+python cross_validation.py 60
 ```
 
 ### Vérification

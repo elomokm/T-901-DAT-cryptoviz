@@ -26,6 +26,10 @@ PRODUCER_CONFIG = {
     'max_in_flight_requests_per_connection': 1,
 }
 
+# API Keys
+CMC_API_KEY = os.getenv('CMC_API_KEY', '')  # CoinMarketCap API Key
+
 # Agent-specific settings (polling intervals en secondes)
 COINGECKO_POLL_INTERVAL = int(os.getenv('COINGECKO_POLL_INTERVAL', '60'))
+COINMARKETCAP_POLL_INTERVAL = int(os.getenv('COINMARKETCAP_POLL_INTERVAL', '120'))
 FEAR_GREED_POLL_INTERVAL = int(os.getenv('FEAR_GREED_POLL_INTERVAL', '300'))
