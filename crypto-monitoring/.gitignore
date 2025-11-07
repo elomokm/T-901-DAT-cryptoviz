@@ -1,4 +1,32 @@
-.venv/  
-checkpoints/
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
 
-TROUBLESHOOTING.md
+# Spark
+checkpoints/
+spark-warehouse/
+derby.log
+metastore_db/
+
+# Environment variables (SECRETS!)
+.env
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

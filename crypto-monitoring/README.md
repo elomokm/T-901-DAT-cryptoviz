@@ -1,180 +1,253 @@
+# 🚀 Crypto Monitoring Pipeline
 
-## Crypto Monitoring Pipeline (Kafka → Spark → InfluxDB → Grafana)
+Pipeline de collecte et analyse de données crypto en temps réel avec architecture agent-based.
 
-Pipeline temps réel pour collecter des prix crypto (CoinGecko), les publier dans Kafka, les traiter avec Spark Structured Streaming, et les stocker dans InfluxDB pour visualisation.
+## 📊 Architecture
 
-### Vue d'ensemble
-- Producteur Python (kafka-python) → Topic Kafka `crypto-prices`
-- Consommateur Spark (foreachBatch) → InfluxDB 2.x (measurement `crypto_price`)
-- Tags/fields:
-	- tag: `crypto`
-	- fields: `price_usd`, `price_eur`, `change_24h`, `market_cap`, `volume_24h`
-- Grafana (optionnel) branché sur InfluxDB pour dashboards
-
----
-
-## Prérequis
-- macOS (zsh)
-- Docker Desktop ou Colima
-- Python 3.11+ (venv)
-- Java 17 (Spark 3.5)
-
-Astuce Java 17 sur macOS:
-```bash
-brew install openjdk@17
-export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+```
+CoinGecko API ──┐
+Fear & Greed ───┼──> Agents ──> Kafka ──> Spark Consumer ──> InfluxDB ──> Grafana
+Binance WS ─────┘
 ```
 
----
-
-## Démarrer l'infrastructure
-
-Le `docker-compose.yml` fournit: Zookeeper, Kafka, InfluxDB (org=bucket préconfigurés), Grafana.
-
-```bash
-cd crypto-monitoring
-docker compose up -d
-```
-
-Accès rapides:
-- Kafka broker: `localhost:9092`
-- InfluxDB UI: http://localhost:8086 (user: `admin`, pass: `adminpassword`)
-- Influx org: `crypto-org`, bucket: `crypto-data`
-- Influx token (init): défini dans `docker-compose.yml` (DOCKER_INFLUXDB_INIT_ADMIN_TOKEN)
-- Grafana: http://localhost:3000 (admin/admin)
-
-Notes Kafka (déjà configuré):
-- `KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092`
-- `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092`
+### Stack Technique
+- **Collecte** : Python Agents (multi-sources)
+- **Message Broker** : Apache Kafka
+- **Traitement** : Spark Structured Streaming  
+- **Stockage** : InfluxDB (time-series)
+- **Visualisation** : Grafana
 
 ---
 
-## Environnement Python
+## ⚡ Quick Start
+
+### Prérequis
+- **Python 3.12+**
+- **Java 17** (pour Spark)
+- **Docker & Docker Compose**
+
+### Installation
 
 ```bash
-cd crypto-monitoring
+# 1. Cloner le projet
+git clone https://github.com/elomokm/T-901-DAT-cryptoviz.git
+cd T-901-DAT-cryptoviz/crypto-monitoring
+
+# 2. Créer l'environnement Python
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # macOS/Linux
+
+# 3. Installer les dépendances
 pip install -r requirements.txt
+
+# 4. Configurer les variables d'environnement
+cp .env.example .env
+# ⚠️ Éditer .env et remplacer 'your_influxdb_token_here' avec ton token
 ```
 
----
+### Configuration InfluxDB
 
-## Lancer le Producteur (Kafka)
-
-Env variables utiles (déjà gérées dans `run_producer.sh`):
-- `SEND_EVERY_POLL=1` (envoi à chaque poll, même si prix identiques)
-- `POLL_INTERVAL_SEC=10`
-
-Lancer:
 ```bash
-./run_producer.sh
+# 1. Démarrer l'infrastructure
+docker-compose up -d kafka zookeeper influxdb grafana
+
+# 2. Accéder à InfluxDB UI : http://localhost:8086
+#    - Username: admin
+#    - Password: (créer lors de la première connexion)
+#    - Org: crypto-org
+#    - Bucket: crypto-data
+
+# 3. Créer un token API
+#    Settings → API Tokens → Generate API Token → All Access Token
+#    Copier le token dans .env (variable INFLUX_TOKEN)
 ```
 
-Journal attendu (extraits):
-- "Producer Kafka connecté avec succès!"
-- "Envoi de 5 messages… → Flush took 0.0Xs → partition=0 offset=…"
+### Lancement du Pipeline
 
-Vérifier le topic (optionnel):
 ```bash
-docker exec -it kafka kafka-run-class kafka.tools.GetOffsetShell \
-	--broker-list localhost:9092 \
-	--topic crypto-prices \
-	--time -1
+# Terminal 1 : CoinGecko Agent (20 cryptos toutes les 60s)
+python3 -m agents.coingecko_agent
+
+# Terminal 2 : Spark Consumer (Kafka → InfluxDB)
+python3 consumer_prices.py
+
+# Terminal 3 (optionnel) : Fear & Greed Agent
+python3 -m agents.fear_greed_agent
 ```
 
----
+### Vérification
 
-## Lancer le Consommateur (Spark → InfluxDB)
-
-Le script `run_consumer.sh` prépare l’environnement (JAVA_HOME=17, PySpark avec venv) et les variables Influx:
-- `INFLUX_URL=http://localhost:8086`
-- `INFLUX_TOKEN=<token du docker-compose>`
-- `INFLUX_ORG=crypto-org`
-- `INFLUX_BUCKET=crypto-data`
-
-Lancer:
 ```bash
-./run_consumer.sh
+# Voir les données dans InfluxDB
+docker exec -it influxdb influx query 'from(bucket: "crypto-data")
+  |> range(start: -5m)
+  |> filter(fn: (r) => r["_measurement"] == "crypto_market")
+  |> filter(fn: (r) => r["_field"] == "price_usd")
+  |> limit(n: 5)'
 ```
 
-Journal attendu (extraits):
-- `Batch N stats => rows=5, min_event_ts=…`
-- tableau par crypto (count)
-- `Batch N: écrit 5 points dans InfluxDB (org=crypto-org, bucket=crypto-data)`
-
-Checkpointing:
-- Emplacement: `./checkpoints/crypto_consumer`
-- Au redémarrage, le consumer reprend là où il s’est arrêté (rattrapage rapide des messages en retard).
+**Accès Grafana** : http://localhost:3000 (admin/admin)
 
 ---
 
-## Vérifier dans InfluxDB UI
+## 📁 Structure du Projet
 
-URL: http://localhost:8086 → login admin/adminpassword → Data Explorer
-
-Guides rapides:
-- Mesure: `crypto_price`
-- Tag: `crypto` (bitcoin, ethereum, cardano, solana, polkadot)
-- Fields: `price_usd` (principal), `price_eur`, etc.
-- Choisir une fenêtre de temps couvrant l’activité (ex: Last 1h/3h).
-
-Exemples Flux (Data Explorer → Script):
-```flux
-from(bucket: "crypto-data")
-	|> range(start: -3h)
-	|> filter(fn: (r) => r["_measurement"] == "crypto_price")
-	|> filter(fn: (r) => r["_field"] == "price_usd")
-	|> filter(fn: (r) => r.crypto =~ /^(bitcoin|ethereum|cardano|solana|polkadot)$/)
-	|> aggregateWindow(every: 1m, fn: last, createEmpty: false)
-	|> yield(name: "price_usd")
+```
+crypto-monitoring/
+├── agents/
+│   ├── __init__.py
+│   ├── base_agent.py          # Classe abstraite (Template Pattern)
+│   ├── config.py              # Configuration centralisée
+│   ├── coingecko_agent.py     # Agent CoinGecko (20 cryptos)
+│   └── fear_greed_agent.py    # Agent Fear & Greed Index
+│
+├── grafana/
+│   ├── dashboards/            # Dashboards JSON
+│   └── provisioning/          # Config auto Grafana
+│
+├── _archive/                  # Ancien code (référence)
+│
+├── consumer_prices.py         # Spark Consumer (Kafka → InfluxDB)
+├── docker-compose.yml         # Infrastructure (Kafka, InfluxDB, Grafana)
+├── requirements.txt           # Dépendances Python
+├── .env.example               # Template de configuration
+├── TROUBLESHOOTING.md         # Guide de debugging
+└── README.md                  # Ce fichier
 ```
 
-Astuce visibilité:
-- Si le consumer a été arrêté un moment, il n’y a pas de points pendant la pause. Au redémarrage, un rattrapage écrit d’un coup les points manquants: élargir la fenêtre de temps pour les voir.
+---
+
+## 🔧 Configuration
+
+### Variables d'Environnement (.env)
+
+| Variable | Description | Défaut |
+|----------|-------------|--------|
+| `KAFKA_BROKER` | Adresse Kafka | `localhost:9092` |
+| `INFLUX_URL` | URL InfluxDB | `http://localhost:8086` |
+| `INFLUX_TOKEN` | Token API InfluxDB | **REQUIS** |
+| `INFLUX_ORG` | Organisation InfluxDB | `crypto-org` |
+| `INFLUX_BUCKET` | Bucket de stockage | `crypto-data` |
+| `COINGECKO_POLL_INTERVAL` | Intervalle CoinGecko (s) | `60` |
+| `FEAR_GREED_POLL_INTERVAL` | Intervalle Fear & Greed (s) | `300` |
 
 ---
 
-## Dépannage
+## 📊 Agents Disponibles
 
-- Producer bloque/timeout:
-	- Vérifier Kafka up, port 9092 exposé, et `acks` est bien un entier (1) dans les env vars.
-	- Relancer le producer via `run_producer.sh` qui nettoie les variables d’env conflictuelles.
+### 1. CoinGeckoAgent ✅
+**Source** : CoinGecko API  
+**Topic Kafka** : `crypto-prices`  
+**Fréquence** : 60s  
+**Données** : 20 cryptos (BTC, ETH, USDT, XRP, BNB, SOL, etc.)
 
-- Consumer erreurs Java/Hadoop:
-	- Utiliser Java 17: `export JAVA_HOME="$(/usr/libexec/java_home -v 17)"`
-	- Flags de compat: `-Djava.security.manager=allow` (déjà ajoutés dans `run_consumer.sh`).
+**Champs collectés** :
+- Prix USD, Market Cap, Volume 24h
+- Variations 1h/24h/7d
+- ATH/ATL avec dates et % changement
+- Circulating/Total/Max Supply
 
-- Influx 401 / pas de points:
-	- Vérifier `INFLUX_TOKEN`, `INFLUX_ORG`, `INFLUX_BUCKET` (identiques au docker-compose).
-	- Regarder les logs consumer: `… écrit N points (org=…, bucket=…)`.
-
-- Influx UI "No Results":
-	- Ajuster la fenêtre de temps (Last 1h/3h) et sélectionner le bon field (`price_usd`).
-	- Éviter d’inclure d’éventuelles séries de test (`/^test_/`).
-
-- Offsets Kafka (sanity check):
-	- GetOffsetShell (commande ci-dessus) pour voir l’avancement.
-
----
-
-## Sécurité & Production
-- Le token Influx actuel est un token d’init de dev. Pour la prod: créer un token dédié et retirer le token du compose.
-- Mettre à jour les variables d’env via secrets/CI/CD.
+### 2. FearGreedAgent ✅
+**Source** : Alternative.me API  
+**Topic Kafka** : `crypto-market-sentiment`  
+**Fréquence** : 300s (5 min)  
+**Données** : Index de sentiment (0-100)
 
 ---
 
-## Étapes suivantes (suggestions)
-- Nettoyer d’anciennes séries de test dans Influx.
-- Créer un dashboard Grafana (BTC/ETH/SOL) sur `price_usd`.
-- Ajouter un service Streamlit pour une UI légère.
-- Alerting basique (seuils de variation 24h) via Influx Tasks ou un microservice Python.
+## 🛠️ Développement
+
+### Créer un Nouvel Agent
+
+```python
+# agents/my_new_agent.py
+from agents.base_agent import BaseAgent
+from agents.config import TOPICS
+import requests
+
+class MyNewAgent(BaseAgent):
+    def __init__(self):
+        super().__init__(
+            name="MyNewAgent",
+            topic=TOPICS['prices'],
+            poll_interval=120
+        )
+    
+    def fetch_data(self):
+        """Implémenter la logique de collecte"""
+        response = requests.get("https://api.example.com/data")
+        data = response.json()
+        
+        # Transformer et retourner une liste de dicts
+        return [{"field1": "value1", "field2": "value2"}]
+
+if __name__ == "__main__":
+    agent = MyNewAgent()
+    agent.run()
+```
 
 ---
 
-## Référence fichiers
-- `crypto_producer.py` — Producteur Kafka (CoinGecko → Kafka `crypto-prices`)
-- `crypto_consumer_spark.py` — Consommateur Spark (Kafka → InfluxDB `crypto_price`)
-- `docker-compose.yml` — Kafka, InfluxDB, Grafana
-- `run_producer.sh` / `run_consumer.sh` — Scripts de lancement (macOS zsh)
-- `requirements.txt` — Dépendances Python
+## 🐛 Troubleshooting
+
+### Problème : "No data" dans InfluxDB malgré logs de succès
+
+**Cause** : Problème de timestamp (données rejetées silencieusement)
+
+**Solution** : Voir [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
+
+### Problème : KafkaTimeoutError
+
+```bash
+# Vérifier que Kafka tourne
+docker ps | grep kafka
+
+# Redémarrer Kafka
+docker-compose restart kafka
+```
+
+### Problème : ImportError dotenv
+
+```bash
+pip install python-dotenv==1.0.1
+```
+
+---
+
+## 📚 Documentation
+
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) - Guide de debugging détaillé
+- [STATUS.md](../STATUS.md) - État du projet et roadmap
+
+---
+
+## 🚀 Roadmap
+
+### Phase 1 : Infrastructure ✅
+- [x] Architecture agent-based
+- [x] CoinGecko Agent (20 cryptos)
+- [x] Spark Consumer
+- [x] Pipeline Kafka → InfluxDB
+- [x] Dashboards Grafana basiques
+
+### Phase 2 : Agents ✅/🔄
+- [x] Fear & Greed Index
+- [ ] Binance WebSocket (temps réel)
+- [ ] CoinMarketCap (validation croisée)
+
+### Phase 3 : Production 📋
+- [ ] Docker Compose complet (agents inclus)
+- [ ] Tests unitaires (pytest)
+- [ ] CI/CD (GitHub Actions)
+- [ ] Health checks & Alerting
+
+---
+
+## 📄 Licence
+
+MIT
+
+## 👤 Auteur
+
+**Elom Okoumassoun**  
+GitHub: [@elomokm](https://github.com/elomokm)

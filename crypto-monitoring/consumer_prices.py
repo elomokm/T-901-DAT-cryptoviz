@@ -11,11 +11,19 @@ Architecture:
 """
 
 import os
+import sys
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS, WriteOptions
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("⚠️  python-dotenv non installé. Variables d'environnement système utilisées.")
 
 # ============================================================
 # CONFIGURATION
@@ -26,12 +34,22 @@ KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:9092')
 KAFKA_TOPIC = 'crypto-prices'
 
 # InfluxDB
-INFLUX_URL = os.getenv('INFLUX_URL', 'http://localhost:8086')
-INFLUX_TOKEN = os.getenv('INFLUX_TOKEN', 'dy8pfKtkEN-NrjdOpeIrT3pKgu_O0h6UDPZ8ehHr4OH4I0ur6Y6fGvJKDUlBFDcCd0f0eD1Bm-R89WihIsvSnw==')
-INFLUX_ORG = os.getenv('INFLUX_ORG', 'crypto-org')
-INFLUX_BUCKET = os.getenv('INFLUX_BUCKET', 'crypto-data')
+INFLUX_URL = os.getenv('INFLUX_URL')
+INFLUX_TOKEN = os.getenv('INFLUX_TOKEN')
+INFLUX_ORG = os.getenv('INFLUX_ORG')
+INFLUX_BUCKET = os.getenv('INFLUX_BUCKET')
 INFLUX_MEASUREMENT = 'crypto_market'
 INFLUX_BATCH_SIZE = int(os.getenv('INFLUX_BATCH_SIZE', '100'))
+
+# Validation des variables critiques
+if not all([INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET]):
+    print("❌ ERREUR : Variables d'environnement manquantes !")
+    print("   Assurez-vous que .env contient :")
+    print("   - INFLUX_URL")
+    print("   - INFLUX_TOKEN")
+    print("   - INFLUX_ORG")
+    print("   - INFLUX_BUCKET")
+    sys.exit(1)
 
 
 # ============================================================

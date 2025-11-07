@@ -1,6 +1,13 @@
 """Configuration commune pour tous les agents"""
 import os
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv non installé, utiliser env système
+
 # Kafka Configuration
 KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'localhost:9092')
 
@@ -18,3 +25,7 @@ PRODUCER_CONFIG = {
     'retries': 3,
     'max_in_flight_requests_per_connection': 1,
 }
+
+# Agent-specific settings (polling intervals en secondes)
+COINGECKO_POLL_INTERVAL = int(os.getenv('COINGECKO_POLL_INTERVAL', '60'))
+FEAR_GREED_POLL_INTERVAL = int(os.getenv('FEAR_GREED_POLL_INTERVAL', '300'))
