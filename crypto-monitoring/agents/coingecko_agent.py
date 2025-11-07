@@ -70,6 +70,9 @@ class CoinGeckoAgent(BaseAgent):
             
             for coin in raw_data:
                 record = {
+                    # Source identifier (for cross-validation)
+                    'source': 'coingecko',
+                    
                     # Métadonnées
                     'timestamp': timestamp,
                     'crypto_id': coin['id'],           # "bitcoin"

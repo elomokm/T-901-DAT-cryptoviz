@@ -64,14 +64,14 @@ if not INFLUX_TOKEN:
     raise ValueError("❌ INFLUX_TOKEN non défini dans .env")
 
 print("="*70)
-print("🔍 SPARK CONSUMER : VALIDATION CROISÉE")
+print(" SPARK CONSUMER : VALIDATION CROISÉE")
 print("="*70)
-print(f"✅ InfluxDB configuré: {INFLUX_URL}")
-print(f"📊 Bucket: {INFLUX_BUCKET} | Org: {INFLUX_ORG}")
-print(f"📡 Kafka Input Topic: {INPUT_TOPIC}")
-print(f"🚨 Kafka DLQ Topic: {DLQ_TOPIC}")
-print(f"⚠️  Seuil anomalie: {DIVERGENCE_WARNING_THRESHOLD}%")
-print(f"🔴 Seuil critique: {DIVERGENCE_CRITICAL_THRESHOLD}%")
+print(f" InfluxDB configuré: {INFLUX_URL}")
+print(f" Bucket: {INFLUX_BUCKET} | Org: {INFLUX_ORG}")
+print(f" Kafka Input Topic: {INPUT_TOPIC}")
+print(f" Kafka DLQ Topic: {DLQ_TOPIC}")
+print(f"  Seuil anomalie: {DIVERGENCE_WARNING_THRESHOLD}%")
+print(f" Seuil critique: {DIVERGENCE_CRITICAL_THRESHOLD}%")
 print("="*70)
 print()
 
@@ -113,8 +113,8 @@ dlq_producer = KafkaProducer(
     acks=1
 )
 
-print("✅ InfluxDB client initialisé")
-print("✅ Kafka DLQ producer initialisé")
+print(" InfluxDB client initialisé")
+print(" Kafka DLQ producer initialisé")
 print()
 
 # ============================================================================
@@ -139,12 +139,22 @@ def write_validation_to_influxdb(batch_df, batch_id):
     
     try:
         print(f"\n{'='*70}")
-        print(f"🔍 BATCH #{batch_id} - Validation Croisée")
+        print(f" BATCH #{batch_id} - Validation Croisée")
         print(f"{'='*70}")
+        
+        # DEBUG: Afficher schéma et données
+        print("\n SCHÉMA DES DONNÉES REÇUES:")
+        batch_df.printSchema()
+        
+        print("\n APERÇU DES DONNÉES (3 premières lignes):")
+        batch_df.show(3, truncate=False)
         
         # Comptage initial
         total_count = batch_df.count()
-        print(f"📊 Messages reçus: {total_count}")
+        print(f"\n Messages reçus: {total_count}")
+        
+        # DEBUG: Afficher les colonnes disponibles
+        print(f" Colonnes disponibles: {batch_df.columns}")
         
         # ====================================================================
         # ÉTAPE 1 : Séparer par source
@@ -159,7 +169,7 @@ def write_validation_to_influxdb(batch_df, batch_id):
         print(f"   └─ CoinGecko: {cg_count} | CoinMarketCap: {cmc_count}")
         
         if cg_count == 0 or cmc_count == 0:
-            print(f"⚠️  Une source manquante, skip validation")
+            print(f"  Une source manquante, skip validation")
             return
         
         # ====================================================================
@@ -196,6 +206,12 @@ def write_validation_to_influxdb(batch_df, batch_id):
                 col("cg.time_window") == col("cmc.time_window")
             ],
             how="inner"
+        ).select(
+            col("cg.symbol").alias("symbol"),
+            col("cg.price_usd").alias("price_cg"),
+            col("cmc.price_usd").alias("price_cmc"),
+            col("cg.market_cap").alias("market_cap_cg"),
+            col("cmc.market_cap").alias("market_cap_cmc")
         )
         
         joined_count = joined.count()
@@ -211,10 +227,10 @@ def write_validation_to_influxdb(batch_df, batch_id):
         
         with_divergence = joined.withColumn(
             "divergence_pct",
-            (spark_abs(col("cg.price_usd") - col("cmc.price_usd")) / col("cg.price_usd")) * 100
+            (spark_abs(col("price_cmc") - col("price_cg")) / col("price_cg")) * 100
         ).withColumn(
             "price_consensus",
-            (col("cg.price_usd") + col("cmc.price_usd")) / 2
+            (col("price_cg") + col("price_cmc")) / 2
         ).withColumn(
             "status",
             expr(f"""
@@ -237,7 +253,7 @@ def write_validation_to_influxdb(batch_df, batch_id):
         warning_count = stats.get('warning', 0)
         critical_count = stats.get('critical', 0)
         
-        print(f"\n📈 Résultats de Validation:")
+        print(f"\n Résultats de Validation:")
         print(f"   ✅ OK (< {DIVERGENCE_WARNING_THRESHOLD}%): {ok_count}")
         print(f"   ⚠️  Warning ({DIVERGENCE_WARNING_THRESHOLD}-{DIVERGENCE_CRITICAL_THRESHOLD}%): {warning_count}")
         print(f"   🔴 Critical (> {DIVERGENCE_CRITICAL_THRESHOLD}%): {critical_count}")
@@ -250,7 +266,8 @@ def write_validation_to_influxdb(batch_df, batch_id):
         dlq_messages = []
         
         for row in with_divergence.collect():
-            symbol = row['cg.symbol']
+            # Accéder aux colonnes sans alias (Spark les renomme automatiquement)
+            symbol = row['symbol']  # Colonne commune du join
             divergence = row['divergence_pct']
             status = row['status']
             
@@ -258,12 +275,12 @@ def write_validation_to_influxdb(batch_df, batch_id):
             point = Point("crypto_validation") \
                 .tag("symbol", symbol) \
                 .tag("status", status) \
-                .field("price_coingecko", float(row['cg.price_usd'])) \
-                .field("price_coinmarketcap", float(row['cmc.price_usd'])) \
+                .field("price_coingecko", float(row['price_cg'])) \
+                .field("price_coinmarketcap", float(row['price_cmc'])) \
                 .field("price_consensus", float(row['price_consensus'])) \
                 .field("divergence_pct", float(divergence)) \
-                .field("market_cap_cg", float(row['cg.market_cap']) if row['cg.market_cap'] else 0.0) \
-                .field("market_cap_cmc", float(row['cmc.market_cap']) if row['cmc.market_cap'] else 0.0) \
+                .field("market_cap_cg", float(row['market_cap_cg']) if row['market_cap_cg'] else 0.0) \
+                .field("market_cap_cmc", float(row['market_cap_cmc']) if row['market_cap_cmc'] else 0.0) \
                 .field("sources_count", 2)
             
             points.append(point)
@@ -274,8 +291,8 @@ def write_validation_to_influxdb(batch_df, batch_id):
                     "symbol": symbol,
                     "status": status,
                     "divergence_pct": float(divergence),
-                    "coingecko_price": float(row['cg.price_usd']),
-                    "coinmarketcap_price": float(row['cmc.price_usd']),
+                    "coingecko_price": float(row['price_cg']),
+                    "coinmarketcap_price": float(row['price_cmc']),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "batch_id": batch_id
                 }
@@ -312,14 +329,14 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("WARN")
 
-print("✅ Spark Session créée")
+print(" Spark Session créée")
 print()
 
 # ============================================================================
 # STREAMING KAFKA → VALIDATION
 # ============================================================================
 
-print("🔄 Démarrage du streaming Kafka...")
+print(" Démarrage du streaming Kafka...")
 print()
 
 # Lire depuis Kafka
@@ -337,15 +354,17 @@ parsed_stream = kafka_stream.selectExpr("CAST(value AS STRING) as json") \
     .select(from_json(col("json"), schema).alias("data")) \
     .select("data.*")
 
-# Écrire via foreachBatch
+# Écrire via foreachBatch avec trigger pour batch toutes les 30 secondes
 query = parsed_stream \
     .writeStream \
     .foreachBatch(write_validation_to_influxdb) \
     .outputMode("append") \
+    .trigger(processingTime='30 seconds') \
     .start()
 
-print(" Consumer de validation démarré !")
+print("✅ Consumer de validation démarré !")
 print(" Écoute du topic:", INPUT_TOPIC)
+print("  Trigger: Batch toutes les 30 secondes")
 print(" Validation en cours...\n")
 
 # Attendre l'arrêt
