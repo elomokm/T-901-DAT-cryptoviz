@@ -3,8 +3,27 @@ import time
 import requests
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
+import logging
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log
+)
+from pybreaker import CircuitBreaker, CircuitBreakerError
 from .base_agent import BaseAgent
 from .config import TOPICS, CMC_API_KEY
+
+# Logger
+logger = logging.getLogger(__name__)
+
+# Circuit Breaker pour CoinMarketCap API
+cmc_circuit_breaker = CircuitBreaker(
+    fail_max=5,
+    reset_timeout=60,
+    name='CoinMarketCapAPI'
+)
 
 class CoinMarketCapAgent(BaseAgent):
     """
@@ -36,7 +55,8 @@ class CoinMarketCapAgent(BaseAgent):
         super().__init__(
             name="CoinMarketCapAgent",
             topic=TOPICS['prices'],  # Même topic que CoinGecko
-            poll_interval=poll_interval
+            poll_interval=poll_interval,
+            schema_file='schemas/crypto_price.avsc'  # Validation Avro activée
         )
         
         # Session HTTP avec API key
@@ -50,9 +70,17 @@ class CoinMarketCapAgent(BaseAgent):
         # Cache pour détection d'anomalies
         self.last_prices = {}
 
+    @cmc_circuit_breaker
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=1, max=60),
+        retry=retry_if_exception_type((requests.RequestException, requests.HTTPError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING)
+    )
     def fetch_data(self) -> Optional[List[Dict]]:
         """
         Récupère les données depuis /cryptocurrency/quotes/latest.
+        Protection: Circuit Breaker + Retry avec exponential backoff.
         
         Returns:
             List[Dict]: Liste de dictionnaires (1 par crypto) ou None si erreur
@@ -191,44 +219,46 @@ class CoinMarketCapAgent(BaseAgent):
     def run(self):
         """
         Boucle principale de l'agent.
-        Collecte et envoie les données toutes les `poll_interval` secondes.
+        Utilise send_batch_to_kafka() pour optimiser les performances.
         """
-        print(f"🚀 [{self.name}] Démarrage (intervalle: {self.poll_interval}s)")
         self.connect_kafka()
         
-        iteration = 0
-        while True:
-            try:
-                iteration += 1
-                print(f"\n [{self.name}] Itération #{iteration} - {datetime.now().strftime('%H:%M:%S')}")
-                
-                # Étape 1 : Récupération des données
-                raw_data = self.fetch_data()
-                if not raw_data:
-                    print(f"  [{self.name}] Aucune donnée, nouvelle tentative dans {self.poll_interval}s")
-                    time.sleep(self.poll_interval)
-                    continue
-                
-                # Étape 2 : Traitement/validation
-                processed_data = self.process_data(raw_data)
-                
-                # Étape 3 : Envoi à Kafka
-                for item in processed_data:
-                    self.send_to_kafka(item)
-                
-                print(f"✅ [{self.name}] {len(processed_data)} messages envoyés à Kafka")
-                
-                # Attente avant prochaine itération
-                time.sleep(self.poll_interval)
-                
-            except KeyboardInterrupt:
-                print(f"\n [{self.name}] Arrêt demandé par l'utilisateur")
-                break
-            except Exception as e:
-                print(f" [{self.name}] Erreur dans la boucle: {e}")
-                time.sleep(self.poll_interval)
+        print(f"🚀 [{self.name}] Démarrage (intervalle: {self.poll_interval}s)")
         
-        # Nettoyage
-        if self.producer:
-            self.producer.close()
-            print(f"👋 [{self.name}] Producer Kafka fermé")
+        try:
+            while True:
+                try:
+                    # Récupérer les données (liste de 20 cryptos)
+                    data_list = self.fetch_data()
+                    
+                    if data_list:
+                        # Traitement/validation
+                        processed_data = self.process_data(data_list)
+                        
+                        # Envoi optimisé en batch avec compression + validation
+                        stats = self.send_batch_to_kafka(processed_data, debug=False, validate=True)
+                        
+                        print(f"✅ [{self.name}] {stats['success']}/{len(processed_data)} envoyés | "
+                              f"Validation: {stats['validation_errors']} erreurs")
+                    
+                    # Attendre avant la prochaine collecte
+                    time.sleep(self.poll_interval)
+                    
+                except CircuitBreakerError:
+                    print(f"🔴 [{self.name}] Circuit Breaker OUVERT - API indisponible")
+                    print(f"   → Attente de {cmc_circuit_breaker.reset_timeout}s avant réessai...")
+                    time.sleep(cmc_circuit_breaker.reset_timeout)
+                    
+                except KeyboardInterrupt:
+                    print(f"\n⏹️  [{self.name}] Arrêt demandé")
+                    break
+                    
+                except Exception as e:
+                    print(f"⚠️  [{self.name}] Erreur: {e}")
+                    time.sleep(30)  # Attendre 30s avant de réessayer
+                    
+        finally:
+            if self.producer:
+                self.producer.flush()
+                self.producer.close()
+                print(f"� [{self.name}] Déconnecté de Kafka")

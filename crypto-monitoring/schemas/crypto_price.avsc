@@ -1,0 +1,141 @@
+{
+  "type": "record",
+  "name": "CryptoPrice",
+  "namespace": "com.cryptoviz.schema",
+  "doc": "Schéma pour les données de prix de cryptomonnaies (CoinGecko, CoinMarketCap)",
+  "fields": [
+    {
+      "name": "source",
+      "type": "string",
+      "doc": "Source des données (coingecko, coinmarketcap, binance)"
+    },
+    {
+      "name": "crypto_id",
+      "type": "string",
+      "doc": "Identifiant unique de la crypto (ex: bitcoin, ethereum)"
+    },
+    {
+      "name": "symbol",
+      "type": "string",
+      "doc": "Symbole ticker (ex: BTC, ETH)"
+    },
+    {
+      "name": "name",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Nom complet de la crypto (ex: Bitcoin, Ethereum)"
+    },
+    {
+      "name": "timestamp",
+      "type": "string",
+      "doc": "Timestamp ISO 8601 de la collecte (ex: 2025-11-09T12:30:00Z)"
+    },
+    {
+      "name": "price_usd",
+      "type": "double",
+      "doc": "Prix actuel en USD"
+    },
+    {
+      "name": "market_cap",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Capitalisation boursière en USD"
+    },
+    {
+      "name": "volume_24h",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Volume de trading sur 24h en USD"
+    },
+    {
+      "name": "percent_change_24h",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en pourcentage sur 24h"
+    },
+    {
+      "name": "market_cap_rank",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Rang par capitalisation boursière"
+    },
+    {
+      "name": "change_1h",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en pourcentage sur 1h"
+    },
+    {
+      "name": "change_24h",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en pourcentage sur 24h"
+    },
+    {
+      "name": "change_7d",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en pourcentage sur 7 jours"
+    },
+    {
+      "name": "ath",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "All-Time High (prix historique maximal)"
+    },
+    {
+      "name": "ath_date",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Date du ATH"
+    },
+    {
+      "name": "ath_change_pct",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en % par rapport au ATH"
+    },
+    {
+      "name": "atl",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "All-Time Low (prix historique minimal)"
+    },
+    {
+      "name": "atl_date",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Date du ATL"
+    },
+    {
+      "name": "atl_change_pct",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Variation en % par rapport au ATL"
+    },
+    {
+      "name": "circulating_supply",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Supply en circulation"
+    },
+    {
+      "name": "total_supply",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Supply totale"
+    },
+    {
+      "name": "max_supply",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Supply maximale théorique"
+    },
+    {
+      "name": "anomaly_detected",
+      "type": ["null", "boolean"],
+      "default": null,
+      "doc": "Flag d'anomalie détectée (validation croisée)"
+    }
+  ]
+}

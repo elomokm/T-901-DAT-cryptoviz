@@ -1,9 +1,21 @@
 """Classe de base pour tous les agents de scraping"""
 import json
 import time
+import os
 from abc import ABC, abstractmethod
+from typing import List, Dict, Optional
+from pathlib import Path
 from kafka import KafkaProducer
 from .config import KAFKA_BROKER, PRODUCER_CONFIG
+
+# Import Avro pour validation
+try:
+    import avro.schema
+    import avro.io
+    AVRO_AVAILABLE = True
+except ImportError:
+    AVRO_AVAILABLE = False
+    print("⚠️  avro-python3 non installé - Validation désactivée")
 
 class BaseAgent(ABC):
     """
@@ -11,17 +23,60 @@ class BaseAgent(ABC):
     Tous les agents doivent hériter de cette classe et implémenter run().
     """
     
-    def __init__(self, name: str, topic: str, poll_interval: int = 300):
+    def __init__(self, name: str, topic: str, poll_interval: int = 300, schema_file: Optional[str] = None):
         """
         Args:
             name: Nom de l'agent (ex: "FearGreedAgent")
             topic: Topic Kafka où envoyer les données
             poll_interval: Intervalle en secondes entre chaque collecte
+            schema_file: Chemin vers le schéma Avro (.avsc) pour validation (optionnel)
         """
         self.name = name
         self.topic = topic
         self.poll_interval = poll_interval
         self.producer = None
+        self.schema = None
+        
+        # Charger le schéma Avro si fourni
+        if schema_file and AVRO_AVAILABLE:
+            self._load_schema(schema_file)
+    
+    def _load_schema(self, schema_file: str):
+        """Charge un schéma Avro depuis un fichier .avsc"""
+        try:
+            schema_path = Path(__file__).parent.parent / schema_file
+            with open(schema_path, 'r') as f:
+                schema_dict = json.load(f)
+                self.schema = avro.schema.parse(json.dumps(schema_dict))
+                print(f"✅ [{self.name}] Schéma Avro chargé: {schema_file}")
+        except Exception as e:
+            print(f"⚠️  [{self.name}] Impossible de charger le schéma {schema_file}: {e}")
+            self.schema = None
+    
+    def validate_data(self, data: dict) -> tuple[bool, Optional[str]]:
+        """
+        Valide un dictionnaire contre le schéma Avro.
+        
+        Args:
+            data: Dictionnaire à valider
+            
+        Returns:
+            (is_valid, error_message): Tuple (bool, str ou None)
+        """
+        if not self.schema or not AVRO_AVAILABLE:
+            return True, None  # Pas de validation si pas de schéma
+        
+        try:
+            # Vérifier que toutes les clés obligatoires sont présentes
+            # et que les types correspondent
+            import io
+            writer = avro.io.DatumWriter(self.schema)
+            bytes_writer = io.BytesIO()
+            encoder = avro.io.BinaryEncoder(bytes_writer)
+            writer.write(data, encoder)
+            return True, None
+        except Exception as e:
+            return False, str(e)
         
     def connect_kafka(self):
         """Crée la connexion au producer Kafka"""
@@ -53,6 +108,81 @@ class BaseAgent(ABC):
         except Exception as e:
             print(f"❌ [{self.name}] Erreur d'envoi: {e}")
             raise
+    
+    def send_batch_to_kafka(self, data_list: List[dict], debug: bool = False, validate: bool = True) -> Dict:
+        """
+        Envoie plusieurs messages en batch (async) pour optimiser les performances.
+        
+        Avantages:
+        - Validation Avro avant envoi (optionnel)
+        - Envoi asynchrone (pas d'attente entre chaque message)
+        - Vérification des erreurs à la fin
+        - Kafka batching automatique côté producer
+        
+        Args:
+            data_list: Liste de dictionnaires à envoyer
+            debug: Afficher les stats de performance (default: False)
+            validate: Valider avec schéma Avro avant envoi (default: True)
+        
+        Returns:
+            dict: Stats {'success': int, 'errors': int, 'validation_errors': int, 'duration_ms': float}
+        """
+        if not self.producer:
+            raise RuntimeError("Producer Kafka non initialisé. Appelez connect_kafka() d'abord.")
+        
+        start_time = time.time()
+        futures = []
+        errors = []
+        validation_errors = 0
+        
+        # Phase 1: Validation + Envoi asynchrone
+        for data in data_list:
+            # Validation Avro (si activée et schéma disponible)
+            if validate and self.schema:
+                is_valid, error_msg = self.validate_data(data)
+                if not is_valid:
+                    crypto_id = data.get('crypto_id', 'unknown')
+                    print(f"⚠️  [{self.name}] Validation échouée pour {crypto_id}: {error_msg}")
+                    validation_errors += 1
+                    continue  # Skip ce message invalide
+            
+            # Envoi asynchrone
+            try:
+                future = self.producer.send(self.topic, value=data)
+                futures.append((future, data))
+            except Exception as e:
+                errors.append((data, str(e)))
+        
+        # Phase 2: Vérifier les résultats de chaque envoi
+        for future, data in futures:
+            try:
+                # Attendre la confirmation (avec timeout)
+                future.get(timeout=10)
+            except Exception as e:
+                errors.append((data, str(e)))
+        
+        duration_ms = (time.time() - start_time) * 1000
+        success_count = len(data_list) - len(errors) - validation_errors
+        
+        # Stats de debugging (optionnel)
+        if debug:
+            print(f"📊 [{self.name}] Batch envoyé: {success_count}/{len(data_list)} succès en {duration_ms:.1f}ms")
+            if validation_errors > 0:
+                print(f"⚠️  [{self.name}] {validation_errors} erreurs de validation")
+            if errors:
+                print(f"⚠️  [{self.name}] {len(errors)} erreurs d'envoi")
+        
+        # Logger les erreurs d'envoi (toujours, même sans debug)
+        for failed_data, error in errors:
+            crypto_id = failed_data.get('crypto_id', 'unknown')
+            print(f"❌ [{self.name}] Échec envoi {crypto_id}: {error}")
+        
+        return {
+            'success': success_count,
+            'errors': len(errors),
+            'validation_errors': validation_errors,
+            'duration_ms': round(duration_ms, 2)
+        }
     
     @abstractmethod
     def fetch_data(self):

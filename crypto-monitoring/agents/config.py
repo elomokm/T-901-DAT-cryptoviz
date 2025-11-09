@@ -21,9 +21,12 @@ TOPICS = {
 
 # Producer Kafka settings
 PRODUCER_CONFIG = {
-    'acks': 1,
-    'retries': 3,
-    'max_in_flight_requests_per_connection': 1,
+    'acks': 1,                                      # Attendre confirmation du leader
+    'retries': 3,                                   # Retry automatique en cas d'échec
+    'max_in_flight_requests_per_connection': 1,    # Garantir l'ordre des messages
+    'compression_type': 'gzip',                     # Compression GZIP (réduit taille de 60-80%)
+    'linger_ms': 10,                                # Attendre 10ms pour batcher plus de messages
+    'batch_size': 32768,                            # Taille max d'un batch (32 Ko)
 }
 
 # API Keys
