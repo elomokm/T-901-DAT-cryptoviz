@@ -7,6 +7,10 @@ class Settings(BaseModel):
     influx_bucket: str = os.getenv("INFLUX_BUCKET", "crypto-data")
     influx_token: str = os.getenv("INFLUX_TOKEN", "")
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:3001")
-    default_cryptos: str = os.getenv("DEFAULT_CRYPTOS", "bitcoin,cardano,ethereum,polkadot,solana")
+    # Top 11 cryptos : BTC, ETH, BNB, XRP, DOGE, SOL, MATIC, LINK, AVAX, ADA, DOT
+    default_cryptos: str = os.getenv(
+        "DEFAULT_CRYPTOS", 
+        "bitcoin,ethereum,binancecoin,ripple,dogecoin,solana,polygon,chainlink,avalanche,cardano,polkadot"
+    )
 
 settings = Settings()
