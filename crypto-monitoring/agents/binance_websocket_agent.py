@@ -260,7 +260,7 @@ class BinanceWebSocketAgent(BaseAgent):
         Thread qui vérifie la santé de la connexion WebSocket.
         Vérifie toutes les 30s si on a reçu des messages récemment.
         """
-        logger.info(f"💓 [{self.name}] Thread heartbeat démarré (check toutes les 30s)")
+        logger.info(f" [{self.name}] Thread heartbeat démarré (check toutes les 30s)")
         
         while self.is_running:
             try:

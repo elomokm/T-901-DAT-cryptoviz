@@ -57,6 +57,9 @@ if not all([INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET]):
 # ============================================================
 
 schema = StructType([
+    # Source (coingecko, coinmarketcap)
+    StructField("source", StringType(), True),         # Source de données
+    
     # Métadonnées (identifiants)
     StructField("timestamp", StringType(), True),      # ISO 8601 timestamp
     StructField("crypto_id", StringType(), True),      # "bitcoin"
@@ -173,7 +176,7 @@ def main():
         
         # Sélectionner uniquement les colonnes nécessaires
         batch = batch_df.select(
-            "event_ts", "crypto_id", "symbol", "name",
+            "source", "event_ts", "crypto_id", "symbol", "name",
             "price_usd", "market_cap", "market_cap_rank", "volume_24h",
             "change_1h", "change_24h", "change_7d",
             "ath", "ath_change_pct", "atl", "atl_change_pct",
@@ -209,7 +212,8 @@ def main():
                 # Créer un Point (ligne de données InfluxDB)
                 p = Point(INFLUX_MEASUREMENT)
                 
-                # TAGS (identifiants, indexés)
+                # TAGS (identifiants, indexés) - AJOUT DU TAG SOURCE
+                p = p.tag("source", str(row.source) if row.source else "unknown")
                 p = p.tag("crypto_id", str(row.crypto_id))
                 p = p.tag("symbol", str(row.symbol))
                 p = p.tag("name", str(row.name))

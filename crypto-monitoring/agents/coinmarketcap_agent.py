@@ -1,9 +1,11 @@
-"""Agent CoinMarketCap - Source alternative + validation croisée"""
+"""Agent CoinMarketCap - Collecte prix et métadonnées"""
+import os
+import sys
 import time
+import logging
 import requests
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
-import logging
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -11,254 +13,205 @@ from tenacity import (
     retry_if_exception_type,
     before_sleep_log
 )
-from pybreaker import CircuitBreaker, CircuitBreakerError
-from .base_agent import BaseAgent
-from .config import TOPICS, CMC_API_KEY
+from pybreaker import CircuitBreaker
 
-# Logger
+# Import helpers
+try:
+    from agents.base_agent import BaseAgent
+    from agents.config import TOPICS, CMC_API_KEY
+except ImportError:
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if pkg_root not in sys.path:
+        sys.path.insert(0, pkg_root)
+    from agents.base_agent import BaseAgent
+    from agents.config import TOPICS, CMC_API_KEY
+
 logger = logging.getLogger(__name__)
 
-# Circuit Breaker pour CoinMarketCap API
-cmc_circuit_breaker = CircuitBreaker(
+api_circuit_breaker = CircuitBreaker(
     fail_max=5,
     reset_timeout=60,
     name='CoinMarketCapAPI'
 )
 
+def _to_float(v) -> Optional[float]:
+    """Convertit en float ou retourne None"""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+def _to_int(v) -> Optional[int]:
+    """Convertit en int ou retourne None"""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
 class CoinMarketCapAgent(BaseAgent):
-    """
-    Agent qui récupère les données depuis CoinMarketCap.
-    Sert de source alternative pour valider les prix CoinGecko.
-    
-    Features:
-    - Collecte top 20 cryptos par market cap
-    - Validation croisée des prix
-    - Détection d'anomalies (divergence > 5%)
-    """
+    """Agent qui récupère les données depuis CoinMarketCap"""
     
     API_BASE = "https://pro-api.coinmarketcap.com/v1"
     
-    # Symboles des top 20 cryptos
-    SYMBOLS = [
-        'BTC', 'ETH', 'USDT', 'BNB', 'SOL',
-        'XRP', 'USDC', 'ADA', 'AVAX', 'DOGE',
-        'DOT', 'LINK', 'DAI', 'LTC', 'SHIB',
-        'UNI', 'ATOM', 'XLM', 'XMR', 'ALGO'
-    ]
-    
-    def __init__(self, poll_interval: int = 120):
-        """
-        Args:
-            poll_interval: Intervalle en secondes (défaut: 120s = 2 min)
-                          Plus long que CoinGecko pour éviter rate limits
-        """
+    def __init__(self, poll_interval: int = 60):
         super().__init__(
             name="CoinMarketCapAgent",
-            topic=TOPICS['prices'],  # Même topic que CoinGecko
+            topic=TOPICS['prices'],
             poll_interval=poll_interval,
-            schema_file='schemas/crypto_price.avsc'  # Validation Avro activée
+            schema_file='schemas/crypto_price.avsc'
         )
         
-        # Session HTTP avec API key
+        self.api_key = CMC_API_KEY
+        if not self.api_key:
+            raise ValueError("CMC_API_KEY manquante dans config.py ou .env")
+        
         self.session = requests.Session()
         self.session.headers.update({
-            'X-CMC_PRO_API_KEY': CMC_API_KEY,
-            'Accept': 'application/json',
-            'User-Agent': 'CryptoViz/2.0'
+            'X-CMC_PRO_API_KEY': self.api_key,
+            'Accept': 'application/json'
         })
-        
-        # Cache pour détection d'anomalies
-        self.last_prices = {}
-
-    @cmc_circuit_breaker
+    
+    @api_circuit_breaker
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1, min=1, max=60),
         retry=retry_if_exception_type((requests.RequestException, requests.HTTPError)),
         before_sleep=before_sleep_log(logger, logging.WARNING)
     )
-    def fetch_data(self) -> Optional[List[Dict]]:
-        """
-        Récupère les données depuis /cryptocurrency/quotes/latest.
-        Protection: Circuit Breaker + Retry avec exponential backoff.
+    def _call_api(self) -> Dict:
+        """Appel à l'API CoinMarketCap"""
+        url = f"{self.API_BASE}/cryptocurrency/listings/latest"
+        params = {
+            'limit': 20,
+            'convert': 'USD',
+            'sort': 'market_cap'
+        }
         
-        Returns:
-            List[Dict]: Liste de dictionnaires (1 par crypto) ou None si erreur
+        response = self.session.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    
+    def fetch_data(self) -> List[Dict]:
+        """
+        Récupère et transforme les données CMC pour le schéma Avro unifié.
+        Mappe tous les champs requis + optionnels du schéma crypto_price.avsc
         """
         try:
-            # Paramètres de l'API
-            params = {
-                'symbol': ','.join(self.SYMBOLS),
-                'convert': 'USD'
-            }
+            api_response = self._call_api()
+            data = api_response.get('data', [])
             
-            # Requête API
-            response = self.session.get(
-                f"{self.API_BASE}/cryptocurrency/quotes/latest",
-                params=params,
-                timeout=10
-            )
-            response.raise_for_status()
+            if not data:
+                print(f"⚠️ [{self.name}] Aucune donnée reçue de CoinMarketCap")
+                return []
             
-            data = response.json()
+            timestamp = datetime.now(timezone.utc).isoformat()
+            enriched = []
             
-            # Vérification du statut
-            if data.get('status', {}).get('error_code') != 0:
-                error_msg = data.get('status', {}).get('error_message', 'Unknown error')
-                print(f"❌ [{self.name}] API Error: {error_msg}")
-                return None
-            
-            # Transformation des données
-            crypto_list = []
-            for symbol in self.SYMBOLS:
-                if symbol not in data.get('data', {}):
-                    continue
+            for coin in data:
+                # Quote USD (contient prix, market_cap, volume, variations)
+                quote = (coin.get('quote') or {}).get('USD') or {}
+                
+                # Mapping vers le schéma unifié
+                record = {
+                    # ===== Champs obligatoires =====
+                    "source": "coinmarketcap",
+                    "crypto_id": (coin.get('slug') or '').lower(),  # ex: "bitcoin"
+                    "symbol": (coin.get('symbol') or '').upper(),   # ex: "BTC"
+                    "timestamp": timestamp,
+                    "price_usd": _to_float(quote.get('price')) or 0.0,  # obligatoire, fallback 0
                     
-                coin = data['data'][symbol]
-                quote = coin['quote']['USD']
-                
-                # Détection d'anomalies
-                current_price = quote['price']
-                anomaly_detected = self._check_anomaly(symbol, current_price)
-                
-                crypto_data = {
-                    'source': 'coinmarketcap',
-                    'crypto_id': coin['slug'],
-                    'symbol': coin['symbol'],
-                    'name': coin['name'],
-                    'price_usd': current_price,
-                    'market_cap': quote['market_cap'],
-                    'volume_24h': quote['volume_24h'],
-                    'volume_change_24h': quote['volume_change_24h'],
-                    'percent_change_1h': quote['percent_change_1h'],
-                    'percent_change_24h': quote['percent_change_24h'],
-                    'percent_change_7d': quote['percent_change_7d'],
-                    'market_cap_dominance': quote['market_cap_dominance'],
-                    'circulating_supply': coin['circulating_supply'],
-                    'total_supply': coin.get('total_supply'),
-                    'max_supply': coin.get('max_supply'),
-                    'cmc_rank': coin['cmc_rank'],
-                    'anomaly_detected': anomaly_detected,
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'last_updated': coin['last_updated']
+                    # ===== Champs optionnels (avec default=null) =====
+                    "name": coin.get('name'),  # ex: "Bitcoin"
+                    "market_cap": _to_float(quote.get('market_cap')),
+                    "volume_24h": _to_float(quote.get('volume_24h')),
+                    "market_cap_rank": _to_int(coin.get('cmc_rank')),
+                    
+                    # Variations (CMC fournit 1h, 24h, 7d, 30d, 60d, 90d)
+                    "change_1h": _to_float(quote.get('percent_change_1h')),
+                    "change_24h": _to_float(quote.get('percent_change_24h')),
+                    "percent_change_24h": _to_float(quote.get('percent_change_24h')),  # alias
+                    "change_7d": _to_float(quote.get('percent_change_7d')),
+                    
+                    # Supply
+                    "circulating_supply": _to_float(coin.get('circulating_supply')),
+                    "total_supply": _to_float(coin.get('total_supply')),
+                    "max_supply": _to_float(coin.get('max_supply')),
+                    
+                    # ATH/ATL: CMC ne fournit pas via /listings/latest → None
+                    # (nécessiterait un appel séparé à /quotes/historical)
+                    "ath": None,
+                    "ath_date": None,
+                    "ath_change_pct": None,
+                    "atl": None,
+                    "atl_date": None,
+                    "atl_change_pct": None,
+                    
+                    # Anomalies (sera calculé par un agent de validation)
+                    "anomaly_detected": None,
                 }
                 
-                crypto_list.append(crypto_data)
+                enriched.append(record)
             
-            print(f"✅ [{self.name}] {len(crypto_list)} cryptos récupérées")
-            return crypto_list
+            print(f" [{self.name}] Récupéré {len(enriched)} cryptos")
+            return enriched
             
-        except requests.exceptions.RequestException as e:
-            print(f"❌ [{self.name}] Erreur réseau: {e}")
-            return None
         except Exception as e:
-            print(f"❌ [{self.name}] Erreur: {e}")
-            return None
-
-    def _check_anomaly(self, symbol: str, current_price: float) -> bool:
-        """
-        Détecte les anomalies de prix (variation > 30% en 2 minutes).
-        
-        Args:
-            symbol: Symbole de la crypto (ex: BTC)
-            current_price: Prix actuel
-            
-        Returns:
-            bool: True si anomalie détectée
-        """
-        if symbol not in self.last_prices:
-            self.last_prices[symbol] = current_price
-            return False
-        
-        last_price = self.last_prices[symbol]
-        if last_price == 0:
-            self.last_prices[symbol] = current_price
-            return False
-        
-        # Calcul de la variation en %
-        variation = abs((current_price - last_price) / last_price) * 100
-        
-        # Anomalie si variation > 30% (probable erreur API)
-        is_anomaly = variation > 30.0
-        
-        if is_anomaly:
-            print(f"  [{self.name}] ANOMALIE {symbol}: {last_price:.2f} → {current_price:.2f} ({variation:.1f}%)")
-        
-        # Mise à jour du cache
-        self.last_prices[symbol] = current_price
-        
-        return is_anomaly
-
-    def process_data(self, data: List[Dict]) -> List[Dict]:
-        """
-        Traite les données avant envoi à Kafka.
-        
-        Args:
-            data: Liste de dictionnaires
-            
-        Returns:
-            List[Dict]: Données filtrées et enrichies
-        """
-        # Filtrer les anomalies (optionnel - on les garde avec flag)
-        processed = []
-        
-        for item in data:
-            # Validation basique
-            if item['price_usd'] <= 0:
-                print(f"⚠️  [{self.name}] Prix invalide pour {item['symbol']}: {item['price_usd']}")
-                continue
-            
-            if item['market_cap'] <= 0:
-                print(f"⚠️  [{self.name}] Market cap invalide pour {item['symbol']}: {item['market_cap']}")
-                continue
-            
-            processed.append(item)
-        
-        return processed
-
+            print(f" [{self.name}] Erreur fetch_data: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
     def run(self):
-        """
-        Boucle principale de l'agent.
-        Utilise send_batch_to_kafka() pour optimiser les performances.
-        """
+        """Boucle principale"""
         self.connect_kafka()
         
-        print(f"🚀 [{self.name}] Démarrage (intervalle: {self.poll_interval}s)")
+        print(f" [{self.name}] Démarrage (intervalle: {self.poll_interval}s)")
         
         try:
             while True:
                 try:
-                    # Récupérer les données (liste de 20 cryptos)
                     data_list = self.fetch_data()
-                    
                     if data_list:
-                        # Traitement/validation
-                        processed_data = self.process_data(data_list)
-                        
-                        # Envoi optimisé en batch avec compression + validation
-                        stats = self.send_batch_to_kafka(processed_data, debug=False, validate=True)
-                        
-                        print(f"✅ [{self.name}] {stats['success']}/{len(processed_data)} envoyés | "
+                        stats = self.send_batch_to_kafka(data_list, debug=True, validate=True)
+                        print(f"✅ [{self.name}] {stats['success']}/{len(data_list)} envoyés | "
                               f"Validation: {stats['validation_errors']} erreurs")
                     
-                    # Attendre avant la prochaine collecte
                     time.sleep(self.poll_interval)
                     
-                except CircuitBreakerError:
-                    print(f"🔴 [{self.name}] Circuit Breaker OUVERT - API indisponible")
-                    print(f"   → Attente de {cmc_circuit_breaker.reset_timeout}s avant réessai...")
-                    time.sleep(cmc_circuit_breaker.reset_timeout)
-                    
                 except KeyboardInterrupt:
-                    print(f"\n [{self.name}] Arrêt demandé")
+                    print(f"\n[{self.name}] Arrêt demandé")
                     break
                     
                 except Exception as e:
-                    print(f"  [{self.name}] Erreur: {e}")
-                    time.sleep(30)  # Attendre 30s avant de réessayer
+                    print(f"❌ [{self.name}] Erreur: {e}")
+                    time.sleep(30)
                     
         finally:
             if self.producer:
                 self.producer.flush()
                 self.producer.close()
-                print(f"� [{self.name}] Déconnecté de Kafka")
+                print(f" [{self.name}] Déconnecté de Kafka")
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Run CoinMarketCap agent")
+    parser.add_argument("--interval", "-i", type=int, help="Intervalle de polling en secondes")
+    args = parser.parse_args()
+    
+    # Priorité: CLI > ENV > fallback
+    interval = None
+    if args.interval is not None:
+        interval = max(5, args.interval)
+    elif os.getenv("COINMARKETCAP_POLL_INTERVAL") and os.getenv("COINMARKETCAP_POLL_INTERVAL").isdigit():
+        interval = max(5, int(os.getenv("COINMARKETCAP_POLL_INTERVAL")))
+    else:
+        interval = 30  # fallback démo
+    
+    print(f"🚀 [CoinMarketCapAgent] Lancement avec intervalle: {interval}s")
+    agent = CoinMarketCapAgent(poll_interval=interval)
+    agent.run()
