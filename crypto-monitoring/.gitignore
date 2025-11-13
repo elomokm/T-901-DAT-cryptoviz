@@ -35,3 +35,7 @@ Thumbs.db
 TROUBLESHOOTING.md
 
 local_doc/
+
+check_influx_data.py
+check_kafka_messages.py
+crypto_data_influx_check.flux
