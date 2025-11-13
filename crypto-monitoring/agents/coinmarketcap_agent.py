@@ -250,11 +250,11 @@ class CoinMarketCapAgent(BaseAgent):
                     time.sleep(cmc_circuit_breaker.reset_timeout)
                     
                 except KeyboardInterrupt:
-                    print(f"\n⏹️  [{self.name}] Arrêt demandé")
+                    print(f"\n [{self.name}] Arrêt demandé")
                     break
                     
                 except Exception as e:
-                    print(f"⚠️  [{self.name}] Erreur: {e}")
+                    print(f"  [{self.name}] Erreur: {e}")
                     time.sleep(30)  # Attendre 30s avant de réessayer
                     
         finally:

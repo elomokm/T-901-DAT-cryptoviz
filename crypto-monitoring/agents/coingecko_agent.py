@@ -12,11 +12,28 @@ from tenacity import (
 )
 import logging
 from pybreaker import CircuitBreaker, CircuitBreakerError
-from .base_agent import BaseAgent
-from .config import TOPICS
+
+# Import helpers: prefer absolute package imports but fall back to
+# local/package-relative imports when the module is executed as a script
+try:
+    # When the project root is on sys.path (typical when running from repo root)
+    from agents.base_agent import BaseAgent
+    from agents.config import TOPICS
+except ImportError:
+    # When running the file directly (python agents/coingecko_agent.py)
+    # the package context may be missing; add the parent directory to sys.path
+    import os
+    import sys
+
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if pkg_root not in sys.path:
+        sys.path.insert(0, pkg_root)
+
+    from agents.base_agent import BaseAgent
+    from agents.config import TOPICS
 
 # Flag de debug pour mesures de performance (local only)
-DEBUG_PERF = False  # Mettre à True pour debug local
+DEBUG_PERF = True  # Mettre à True pour debug local
 
 # Logger pour tenacity
 logger = logging.getLogger(__name__)
@@ -187,11 +204,11 @@ class CoinGeckoAgent(BaseAgent):
                     time.sleep(api_circuit_breaker.reset_timeout)
                     
                 except KeyboardInterrupt:
-                    print(f"\n⏹️  [{self.name}] Arrêt demandé")
+                    print(f"\n  [{self.name}] Arrêt demandé")
                     break
                     
                 except Exception as e:
-                    print(f"⚠️  [{self.name}] Erreur: {e}")
+                    print(f" [{self.name}] Erreur: {e}")
                     time.sleep(30)  # Attendre 30s avant de réessayer
                     
         finally:
@@ -203,6 +220,22 @@ class CoinGeckoAgent(BaseAgent):
 
 # Point d'entrée
 if __name__ == "__main__":
-    import time
-    agent = CoinGeckoAgent(poll_interval=60)
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description="Run CoinGecko agent")
+    parser.add_argument("--interval", "-i", type=int, help="Intervalle de polling en secondes")
+    args = parser.parse_args()
+
+    # Priorité: CLI > ENV > fallback (30s pour démo)
+    interval = None
+    if args.interval is not None:
+        interval = max(5, args.interval)
+    elif os.getenv("COINGECKO_POLL_INTERVAL") and os.getenv("COINGECKO_POLL_INTERVAL").isdigit():
+        interval = max(5, int(os.getenv("COINGECKO_POLL_INTERVAL")))
+    else:
+        interval = 30
+
+    print(f" [CoinGeckoAgent] Lancement avec intervalle: {interval}s")
+    agent = CoinGeckoAgent(poll_interval=interval)
     agent.run()

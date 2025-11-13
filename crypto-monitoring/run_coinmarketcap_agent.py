@@ -12,21 +12,21 @@ from agents.config import COINMARKETCAP_POLL_INTERVAL
 def main():
     """Point d'entrée du script"""
     print("="*60)
-    print("🚀 CoinMarketCap Agent - Source Alternative + Validation")
+    print(" CoinMarketCap Agent - Source Alternative + Validation")
     print("="*60)
     
     # Vérifier que la clé API est configurée
     from agents.config import CMC_API_KEY
     if not CMC_API_KEY:
-        print("❌ ERREUR: CMC_API_KEY non définie dans .env")
-        print("\n📝 Obtenez votre clé API gratuite sur:")
+        print("ERREUR: CMC_API_KEY non définie dans .env")
+        print("\n Obtenez votre clé API gratuite sur:")
         print("   https://coinmarketcap.com/api/")
-        print("\n💡 Ajoutez ensuite dans .env:")
+        print("\n Ajoutez ensuite dans .env:")
         print("   CMC_API_KEY=votre_cle_ici")
         sys.exit(1)
     
-    print(f"✅ CMC_API_KEY configurée: {CMC_API_KEY[:8]}...{CMC_API_KEY[-4:]}")
-    print(f"⏱️  Intervalle de polling: {COINMARKETCAP_POLL_INTERVAL}s")
+    print(f" CMC_API_KEY configurée: {CMC_API_KEY[:8]}...{CMC_API_KEY[-4:]}")
+    print(f"  Intervalle de polling: {COINMARKETCAP_POLL_INTERVAL}s")
     print()
     
     # Créer et lancer l'agent
