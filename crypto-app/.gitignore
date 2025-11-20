@@ -1,6 +1,0 @@
-#Node_modules
-node_modules/
-
-#cache files
-.cache/
-.next/
