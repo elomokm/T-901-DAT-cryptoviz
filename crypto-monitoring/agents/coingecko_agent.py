@@ -1,4 +1,8 @@
-"""Agent CoinGecko - Collecte prix et métadonnées de 20 cryptos"""
+"""
+CoinGecko Market Data Feed Collector
+Real-time cryptocurrency market data scraper using CoinGecko API
+Collects price, volume, market cap, and metadata for top cryptocurrencies
+"""
 import time 
 import requests
 from datetime import datetime, timezone
@@ -49,8 +53,16 @@ api_circuit_breaker = CircuitBreaker(
 
 class CoinGeckoAgent(BaseAgent):
     """
-    Agent qui récupère les données de 20 cryptos depuis CoinGecko.
-    Endpoint : /coins/markets (plus riche que /simple/price)
+    Market Data Feed Collector - CoinGecko Source
+
+    Continuously scrapes cryptocurrency market data from CoinGecko API.
+    Implements producer/consumer paradigm by sending data to Kafka.
+
+    Features:
+    - Collects data for 20 major cryptocurrencies
+    - Uses /coins/markets endpoint for comprehensive market data
+    - Implements circuit breaker pattern for API resilience
+    - Validates data against Avro schema before sending
     """
     
     API_BASE = "https://api.coingecko.com/api/v3"
@@ -199,7 +211,7 @@ class CoinGeckoAgent(BaseAgent):
                     time.sleep(self.poll_interval)
                     
                 except CircuitBreakerError:
-                    print(f"🔴 [{self.name}] Circuit Breaker OUVERT - API indisponible")
+                    print(f" [{self.name}] Circuit Breaker OUVERT - API indisponible")
                     print(f"   → Attente de {api_circuit_breaker.reset_timeout}s avant réessai...")
                     time.sleep(api_circuit_breaker.reset_timeout)
                     

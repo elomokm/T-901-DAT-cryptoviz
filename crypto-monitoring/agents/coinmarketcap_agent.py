@@ -1,4 +1,8 @@
-"""Agent CoinMarketCap - Collecte prix et métadonnées"""
+"""
+CoinMarketCap Market Data Feed Collector
+Professional-grade cryptocurrency market data scraper using CoinMarketCap API
+Provides cross-validation data source for market analytics
+"""
 import os
 import sys
 import time
@@ -53,7 +57,18 @@ def _to_int(v) -> Optional[int]:
         return None
 
 class CoinMarketCapAgent(BaseAgent):
-    """Agent qui récupère les données depuis CoinMarketCap"""
+    """
+    Market Data Feed Collector - CoinMarketCap Source
+
+    Continuously scrapes cryptocurrency market data from CoinMarketCap API.
+    Implements producer/consumer paradigm by sending data to Kafka.
+
+    Features:
+    - Collects data for top 20 cryptocurrencies by market cap
+    - Uses professional CoinMarketCap API with authentication
+    - Cross-validation data source (compared with CoinGecko)
+    - Implements circuit breaker and retry logic for resilience
+    """
     
     API_BASE = "https://pro-api.coinmarketcap.com/v1"
     

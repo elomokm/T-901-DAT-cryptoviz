@@ -130,7 +130,8 @@ def main():
         .format("kafka") \
         .option("kafka.bootstrap.servers", KAFKA_BROKER) \
         .option("subscribe", KAFKA_TOPIC) \
-        .option("startingOffsets", "earliest") \
+        .option("startingOffsets", "latest") \
+        .option("failOnDataLoss", "false") \
         .load()
     
     print(f" Stream Kafka connecté")

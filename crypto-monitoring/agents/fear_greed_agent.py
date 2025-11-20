@@ -1,13 +1,38 @@
-"""Agent pour récupérer le Fear & Greed Index"""
+"""
+Market Sentiment Data Feed Collector
+Scrapes the Crypto Fear & Greed Index for market sentiment analysis
+"""
 import requests
 from datetime import datetime, timezone
-from .base_agent import BaseAgent
-from .config import TOPICS
+try:
+    # When the project root is on sys.path (typical when running from repo root)
+    from agents.base_agent import BaseAgent
+    from agents.config import TOPICS
+except ImportError:
+    # When running the file directly (python agents/coingecko_agent.py)
+    # the package context may be missing; add the parent directory to sys.path
+    import os
+    import sys
+
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if pkg_root not in sys.path:
+        sys.path.insert(0, pkg_root)
+
+    from agents.base_agent import BaseAgent
+    from agents.config import KAFKA_BROKER, TOPICS
 
 class FearGreedAgent(BaseAgent):
     """
-    Agent qui récupère le Fear & Greed Index depuis alternative.me
-    API: https://api.alternative.me/fng/
+    Market Sentiment Data Feed Collector - Fear & Greed Index
+
+    Continuously scrapes cryptocurrency market sentiment data.
+    Implements producer/consumer paradigm by sending data to Kafka.
+
+    Features:
+    - Collects Fear & Greed Index (0-100 scale)
+    - Provides sentiment classification (Extreme Fear → Extreme Greed)
+    - Essential for market psychology analytics
+    - Source: Alternative.me API
     """
     
     API_URL = "https://api.alternative.me/fng/"

@@ -13,7 +13,7 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"market_cap\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum(column: \"_value\")\n  |> group()"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"market_cap\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum(column: \"_value\")\n  |> group()"
         }
       ],
       "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []},
@@ -28,7 +28,7 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"volume_24h\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum(column: \"_value\")\n  |> group()"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"volume_24h\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> group(columns: [\"_time\"])\n  |> sum(column: \"_value\")\n  |> group()"
         }
       ],
       "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []},
@@ -43,7 +43,7 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")"
         }
       ],
       "fieldConfig": {
@@ -61,13 +61,13 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"price_usd\")"
         },
         {
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "B",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"volume_24h\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"volume_24h\")"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"volume_24h\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n  |> yield(name: \"volume_24h\")"
         }
       ],
       "fieldConfig": {
@@ -93,7 +93,7 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\")\n  |> filter(fn: (r) => r._field == \"market_cap\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> yield(name: \"market_cap\")"
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"market_cap\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> yield(name: \"market_cap\")"
         }
       ],
       "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []},
@@ -108,7 +108,7 @@
           "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
           "queryType": "flux",
           "refId": "A",
-          "query": "p = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 24h, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_price\" and r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n\np0 = p |> group(columns: [\"crypto\"]) |> first() |> rename(columns: {_value: \"p0\"}) |> keep(columns: [\"crypto\", \"p0\"])\np1 = p |> group(columns: [\"crypto\"]) |> last()  |> rename(columns: {_value: \"p1\"}) |> keep(columns: [\"_time\", \"crypto\", \"p1\"])\njoin(tables: {a: p1, b: p0}, on: [\"crypto\"])\n  |> map(fn: (r) => ({ r with _value: if r.p0 == 0.0 then 0.0 else (r.p1 - r.p0) / r.p0 * 100.0 }))\n  |> keep(columns: [\"_time\", \"_value\", \"crypto\"])"
+          "query": "p = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 24h, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\" and r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n\np0 = p |> group(columns: [\"crypto\"]) |> first() |> rename(columns: {_value: \"p0\"}) |> keep(columns: [\"crypto\", \"p0\"])\np1 = p |> group(columns: [\"crypto\"]) |> last()  |> rename(columns: {_value: \"p1\"}) |> keep(columns: [\"_time\", \"crypto\", \"p1\"])\njoin(tables: {a: p1, b: p0}, on: [\"crypto\"])\n  |> map(fn: (r) => ({ r with _value: if r.p0 == 0.0 then 0.0 else (r.p1 - r.p0) / r.p0 * 100.0 }))\n  |> keep(columns: [\"_time\", \"_value\", \"crypto\"])"
         }
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
@@ -129,7 +129,7 @@
         "refresh": 2,
         "multi": true,
         "includeAll": true,
-        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"crypto-data\", tag: \"crypto\", predicate: (r) => r._measurement == \"crypto_price\", start: -90d)",
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"crypto-data\", tag: \"crypto\", predicate: (r) => r._measurement == \"crypto_market\", start: -90d)",
         "regex": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
         "allValue": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
         "sort": 1

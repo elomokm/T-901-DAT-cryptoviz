@@ -1,4 +1,8 @@
-"""Classe de base pour tous les agents de scraping"""
+"""
+Base Agent for Market Data Feed Collectors
+Abstract class implementing the Producer pattern for cryptocurrency data collection
+All data feed collectors inherit from this base class
+"""
 import json
 import time
 import os
@@ -15,12 +19,19 @@ try:
     AVRO_AVAILABLE = True
 except ImportError:
     AVRO_AVAILABLE = False
-    print("⚠️  avro-python3 non installé - Validation désactivée")
+    print("  avro-python3 non installé - Validation désactivée")
 
 class BaseAgent(ABC):
     """
-    Classe abstraite pour les agents de scraping.
-    Tous les agents doivent hériter de cette classe et implémenter run().
+    Base class for all Market Data Feed Collectors (Producer pattern).
+
+    This abstract class provides the foundation for cryptocurrency data collection agents.
+    Implements the Producer side of the Producer/Consumer paradigm by:
+    - Continuously collecting data from external sources (APIs, RSS feeds, WebSockets)
+    - Validating data against Avro schemas
+    - Sending data to Kafka topics for stream processing
+
+    All feed collectors must inherit from this class and implement fetch_data().
     """
     
     def __init__(self, name: str, topic: str, poll_interval: int = 300, schema_file: Optional[str] = None):
@@ -48,9 +59,9 @@ class BaseAgent(ABC):
             with open(schema_path, 'r') as f:
                 schema_dict = json.load(f)
                 self.schema = avro.schema.parse(json.dumps(schema_dict))
-                print(f"✅ [{self.name}] Schéma Avro chargé: {schema_file}")
+                print(f" [{self.name}] Schéma Avro chargé: {schema_file}")
         except Exception as e:
-            print(f"⚠️  [{self.name}] Impossible de charger le schéma {schema_file}: {e}")
+            print(f"  [{self.name}] Impossible de charger le schéma {schema_file}: {e}")
             self.schema = None
     
     def validate_data(self, data: dict) -> tuple[bool, Optional[str]]:
@@ -86,9 +97,9 @@ class BaseAgent(ABC):
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 **PRODUCER_CONFIG
             )
-            print(f"✅ [{self.name}] Connecté à Kafka ({KAFKA_BROKER})")
+            print(f" [{self.name}] Connecté à Kafka ({KAFKA_BROKER})")
         except Exception as e:
-            print(f"❌ [{self.name}] Erreur Kafka: {e}")
+            print(f" [{self.name}] Erreur Kafka: {e}")
             raise
     
     def send_to_kafka(self, data: dict):
@@ -104,9 +115,9 @@ class BaseAgent(ABC):
         try:
             future = self.producer.send(self.topic, value=data)
             future.get(timeout=10)  # Bloque jusqu'à confirmation
-            print(f"📤 [{self.name}] Envoyé vers {self.topic}: {data}")
+            print(f" [{self.name}] Envoyé vers {self.topic}: {data}")
         except Exception as e:
-            print(f"❌ [{self.name}] Erreur d'envoi: {e}")
+            print(f" [{self.name}] Erreur d'envoi: {e}")
             raise
     
     def send_batch_to_kafka(self, data_list: List[dict], debug: bool = False, validate: bool = True) -> Dict:
@@ -142,7 +153,7 @@ class BaseAgent(ABC):
                 is_valid, error_msg = self.validate_data(data)
                 if not is_valid:
                     crypto_id = data.get('crypto_id', 'unknown')
-                    print(f"⚠️  [{self.name}] Validation échouée pour {crypto_id}: {error_msg}")
+                    print(f"  [{self.name}] Validation échouée pour {crypto_id}: {error_msg}")
                     validation_errors += 1
                     continue  # Skip ce message invalide
             
@@ -166,16 +177,16 @@ class BaseAgent(ABC):
         
         # Stats de debugging (optionnel)
         if debug:
-            print(f"📊 [{self.name}] Batch envoyé: {success_count}/{len(data_list)} succès en {duration_ms:.1f}ms")
+            print(f" [{self.name}] Batch envoyé: {success_count}/{len(data_list)} succès en {duration_ms:.1f}ms")
             if validation_errors > 0:
-                print(f"⚠️  [{self.name}] {validation_errors} erreurs de validation")
+                print(f"  [{self.name}] {validation_errors} erreurs de validation")
             if errors:
-                print(f"⚠️  [{self.name}] {len(errors)} erreurs d'envoi")
+                print(f"  [{self.name}] {len(errors)} erreurs d'envoi")
         
         # Logger les erreurs d'envoi (toujours, même sans debug)
         for failed_data, error in errors:
             crypto_id = failed_data.get('crypto_id', 'unknown')
-            print(f"❌ [{self.name}] Échec envoi {crypto_id}: {error}")
+            print(f" [{self.name}] Échec envoi {crypto_id}: {error}")
         
         return {
             'success': success_count,
@@ -217,10 +228,10 @@ class BaseAgent(ABC):
                     time.sleep(self.poll_interval)
                     
                 except KeyboardInterrupt:
-                    print(f"\n⏹️  [{self.name}] Arrêt demandé")
+                    print(f"\n  [{self.name}] Arrêt demandé")
                     break
                 except Exception as e:
-                    print(f"⚠️  [{self.name}] Erreur: {e}")
+                    print(f"  [{self.name}] Erreur: {e}")
                     time.sleep(10)  # Attendre 10s avant de réessayer
                     
         finally:
