@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ExternalLink, Globe, TrendingUp, TrendingDown } from 'lucide-react';
 import InteractiveChart from '@/components/InteractiveChart';
+import PriceRangeBar from '@/components/PriceRangeBar';
 import { CoinHistoryResponse, Period } from '@/types';
 import { getCoinHistory } from '@/lib/api';
 import {
@@ -119,6 +120,17 @@ export default function CoinPage() {
             </div>
           </div>
         </div>
+        
+        {/* 24h Price Range */}
+        {coin.low_24h && coin.high_24h && (
+          <div className="mt-6">
+            <PriceRangeBar
+              low={coin.low_24h}
+              high={coin.high_24h}
+              current={coin.current_price}
+            />
+          </div>
+        )}
       </div>
 
       {/* Price Chart */}
@@ -126,7 +138,7 @@ export default function CoinPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Price History</h2>
           <div className="flex gap-2">
-            {(['24h', '7d', '30d', '90d', '1y'] as Period[]).map((p) => (
+            {(['1h', '24h', '7d', '30d', '90d', '1y'] as Period[]).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -228,19 +240,58 @@ export default function CoinPage() {
       {coin.description && (
         <div className="glass-card p-6">
           <h3 className="text-lg font-semibold mb-4">About {coin.name}</h3>
-          <p className="text-gray-300 leading-relaxed">{coin.description}</p>
-          {coin.homepage && (
-            <a
-              href={coin.homepage}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 mt-4 text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              <Globe className="w-4 h-4" />
-              Official Website
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
+          <p className="text-gray-300 leading-relaxed line-clamp-4">{coin.description}</p>
+          
+          {/* Links Section */}
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {coin.homepage && (
+              <a
+                href={coin.homepage}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <Globe className="w-4 h-4 text-blue-400" />
+                <span className="text-sm">Official Website</span>
+                <ExternalLink className="w-3 h-3 ml-auto text-gray-400" />
+              </a>
+            )}
+            
+            {coin.whitepaper && (
+              <a
+                href={coin.whitepaper}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="text-sm">Whitepaper</span>
+                <ExternalLink className="w-3 h-3 ml-auto text-gray-400" />
+              </a>
+            )}
+            
+            {coin.blockchain_site && coin.blockchain_site.length > 0 && (
+              <>
+                {coin.blockchain_site.slice(0, 2).map((site, idx) => (
+                  <a
+                    key={idx}
+                    href={site}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <span className="text-sm">Explorer {idx + 1}</span>
+                    <ExternalLink className="w-3 h-3 ml-auto text-gray-400" />
+                  </a>
+                ))}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

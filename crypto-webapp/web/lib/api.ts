@@ -5,6 +5,8 @@ import {
   NewsResponse,
   FearGreedResponse,
   Period,
+  CryptoAnalytics,
+  ComparisonResult,
 } from '@/types';
 
 // API base URL
@@ -128,20 +130,29 @@ export async function getCoinHistory(
   id: string,
   period: Period = '7d'
 ): Promise<CoinHistoryResponse> {
-  // Map frontend period to backend days parameter
-  const periodToDays: Record<Period, number> = {
-    '24h': 1,
-    '7d': 7,
-    '30d': 30,
-    '90d': 90,
-    '1y': 365,
-    'all': 365 * 5  // 5 years for "all"
+  // Map frontend period to backend parameters
+  const periodToParams: Record<Period, { days?: number; hours?: number; interval: string }> = {
+    '1h': { hours: 1, interval: '5m' },
+    '24h': { days: 1, interval: '1h' },
+    '7d': { days: 7, interval: '4h' },
+    '30d': { days: 30, interval: '1d' },
+    '90d': { days: 90, interval: '1d' },
+    '1y': { days: 365, interval: '1d' },
+    'all': { days: 365 * 5, interval: '1d' }  // 5 years for "all"
   };
   
-  const days = periodToDays[period] || 7;
-  const interval = period === '24h' ? '1h' : period === '7d' ? '4h' : '1d';
+  const params = periodToParams[period] || { days: 7, interval: '4h' };
+  const searchParams = new URLSearchParams();
   
-  return apiFetch<CoinHistoryResponse>(`/api/v1/coins/${id}/history?days=${days}&interval=${interval}`);
+  if (params.hours) {
+    searchParams.append('hours', params.hours.toString());
+    searchParams.append('days', '0');
+  } else if (params.days) {
+    searchParams.append('days', params.days.toString());
+  }
+  searchParams.append('interval', params.interval);
+  
+  return apiFetch<CoinHistoryResponse>(`/api/v1/coins/${id}/history?${searchParams.toString()}`);
 }
 
 /**
@@ -200,4 +211,45 @@ export async function getFearGreed(): Promise<FearGreedResponse> {
  */
 export async function searchCoins(query: string): Promise<CoinSummary[]> {
   return apiFetch<CoinSummary[]>(`/api/v1/search?q=${encodeURIComponent(query)}`);
+}
+
+/**
+ * Get analytics for specific cryptos
+ */
+export async function getAnalytics(params?: {
+  crypto_ids?: string[];
+  limit?: number;
+}): Promise<CryptoAnalytics[]> {
+  const searchParams = new URLSearchParams();
+  
+  if (params?.crypto_ids && params.crypto_ids.length > 0) {
+    searchParams.append('crypto_ids', params.crypto_ids.join(','));
+  }
+  if (params?.limit) {
+    searchParams.append('limit', params.limit.toString());
+  }
+  
+  const query = searchParams.toString();
+  return apiFetch<CryptoAnalytics[]>(`/api/v1/analytics${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Compare multiple cryptocurrencies
+ */
+export async function compareCryptos(
+  cryptoIds: string[],
+  period: '1h' | '24h' | '7d' | '30d' = '24h'
+): Promise<ComparisonResult> {
+  const searchParams = new URLSearchParams();
+  searchParams.append('crypto_ids', cryptoIds.join(','));
+  searchParams.append('period', period);
+  
+  return apiFetch<ComparisonResult>(`/api/v1/analytics/compare?${searchParams.toString()}`);
+}
+
+/**
+ * Get top volatile cryptocurrencies
+ */
+export async function getTopVolatile(limit: number = 10): Promise<CryptoAnalytics[]> {
+  return apiFetch<CryptoAnalytics[]>(`/api/v1/analytics/top-volatile?limit=${limit}`);
 }

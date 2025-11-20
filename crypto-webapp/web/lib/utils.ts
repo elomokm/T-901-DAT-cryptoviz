@@ -104,7 +104,17 @@ export function getChangeBgColor(value: number | undefined | null): string {
  * Format relative time (e.g., "5 minutes ago")
  */
 export function formatRelativeTime(dateString: string): string {
+  if (!dateString || dateString === '') {
+    return 'N/A';
+  }
+  
   const date = new Date(dateString);
+  
+  // Vérifier si la date est valide
+  if (isNaN(date.getTime())) {
+    return 'N/A';
+  }
+  
   const now = new Date();
   const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 

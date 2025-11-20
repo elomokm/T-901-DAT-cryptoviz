@@ -65,6 +65,8 @@ export interface CoinHistoryResponse {
   atl_date: string;
   description?: string;
   homepage?: string;
+  whitepaper?: string;
+  blockchain_site?: string[];
   prices: PricePoint[];
 }
 
@@ -124,7 +126,7 @@ export interface OrderOption {
 }
 
 // Time period for charts
-export type Period = '24h' | '7d' | '30d' | '90d' | '1y' | 'all';
+export type Period = '1h' | '24h' | '7d' | '30d' | '90d' | '1y' | 'all';
 
 export interface PeriodOption {
   value: Period;
@@ -151,4 +153,48 @@ export interface FearGreedClassification {
   color: string;
   bgColor: string;
   textColor: string;
+}
+
+// Analytics data for a cryptocurrency
+export interface CryptoAnalytics {
+  crypto_id: string;
+  symbol: string;
+  name: string;
+  price_mean: number;
+  price_std: number;
+  price_min: number;
+  price_max: number;
+  price_range: number;
+  volatility_pct: number;
+  volume_mean: number;
+  volume_std: number;
+  anomaly_count: number;
+  data_points: number;
+  timestamp: string;
+}
+
+// Comparison result
+export interface ComparisonResult {
+  cryptos: CryptoAnalytics[];
+  period: string;
+  comparison_time: string;
+  rankings: {
+    most_volatile: string[];
+    highest_volume: string[];
+    highest_price: string[];
+  };
+}
+
+// Comparison criteria
+export type ComparisonCriterion = 
+  | 'volatility' 
+  | 'volume' 
+  | 'price' 
+  | 'price_range' 
+  | 'anomalies';
+
+export interface ComparisonCriterionOption {
+  value: ComparisonCriterion;
+  label: string;
+  description: string;
 }

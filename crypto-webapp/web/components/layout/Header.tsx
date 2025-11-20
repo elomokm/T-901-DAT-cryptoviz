@@ -34,6 +34,12 @@ export default function Header() {
             >
               Dashboard
             </Link>
+            <Link
+              href="/compare"
+              className="text-gray-300 hover:text-white transition-colors"
+            >
+              Comparaison
+            </Link>
           </nav>
 
           {/* Search Bar */}
@@ -81,6 +87,13 @@ export default function Header() {
                 onClick={() => setIsMobileMenuOpen(false)}
               >
                 Dashboard
+              </Link>
+              <Link
+                href="/compare"
+                className="px-3 py-2 text-gray-300 hover:text-white hover:bg-gray-800/50 rounded-lg transition-colors"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                Comparaison
               </Link>
             </nav>
           </div>
