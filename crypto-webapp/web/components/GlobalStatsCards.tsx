@@ -27,14 +27,14 @@ export default function GlobalStatsCards({ stats, loading }: GlobalStatsCardsPro
   const cards = [
     {
       title: 'Total Market Cap',
-      value: formatLargeNumber(stats?.total_market_cap),
-      change: stats?.market_cap_change_percentage_24h,
+      value: formatLargeNumber(stats?.total_market_cap_usd || stats?.total_market_cap || 0),
+      change: stats?.market_cap_change_percentage_24h_usd || stats?.market_cap_change_percentage_24h,
       icon: DollarSign,
       iconColor: 'text-blue-400',
     },
     {
       title: '24h Volume',
-      value: formatLargeNumber(stats?.total_volume),
+      value: formatLargeNumber(stats?.total_volume_usd || stats?.total_volume || 0),
       icon: BarChart3,
       iconColor: 'text-purple-400',
     },

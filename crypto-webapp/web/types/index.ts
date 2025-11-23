@@ -27,15 +27,19 @@ export interface CoinSummary {
 
 // Global market statistics
 export interface GlobalStats {
-  total_market_cap: number;
-  total_volume: number;
+  total_market_cap?: number;  // Ancienne version (fallback)
+  total_volume?: number;  // Ancienne version (fallback)
+  total_market_cap_usd?: number;  // Nouvelle version API
+  total_volume_usd?: number;  // Nouvelle version API
   market_cap_percentage: {
     btc: number;
     eth: number;
   };
-  market_cap_change_percentage_24h: number;
+  market_cap_change_percentage_24h?: number;
+  market_cap_change_percentage_24h_usd?: number;  // Nouvelle version API
   active_cryptocurrencies: number;
   markets: number;
+  updated_at?: string;  // Timestamp de mise à jour
 }
 
 // Detailed coin history response
