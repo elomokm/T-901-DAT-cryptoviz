@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, ExternalLink, Globe, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Globe, TrendingUp, TrendingDown, Plus, X } from 'lucide-react';
 import MultiChart, { ChartType } from '@/components/MultiChart';
 import ChartTypeSelector from '@/components/ChartTypeSelector';
 import PriceRangeBar from '@/components/PriceRangeBar';
-import { CoinHistoryResponse, Period } from '@/types';
+import { CoinHistoryResponse, Period, CoinSummary } from '@/types';
 import { getCoinHistory } from '@/lib/api';
+import { useBootstrap } from '@/lib/hooks';
 import {
   formatPrice,
   formatLargeNumber,
@@ -17,6 +18,7 @@ import {
   getChangeColor,
   formatRelativeTime,
 } from '@/lib/utils';
+import ComparisonChart from '@/components/ComparisonChart';
 
 export default function CoinPage() {
   const params = useParams();
@@ -27,7 +29,29 @@ export default function CoinPage() {
   const [chartType, setChartType] = useState<ChartType>('line');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Comparaison multi-coins
+  const [compareCoins, setCompareCoins] = useState<CoinHistoryResponse[]>([]);
+  const [showCoinSelector, setShowCoinSelector] = useState(false);
+  const { coins: availableCoins } = useBootstrap(100, false);
+  
   // Mode silencieux: pas de warnings affichés, fallback transparent
+
+  // Fonction pour ajouter une crypto à comparer
+  const addCompareC = async (id: string) => {
+    if (compareCoins.find(c => c.id === id) || id === coinId) return;
+    
+    try {
+      const data = await getCoinHistory(id, period);
+      setCompareCoins(prev => [...prev, data]);
+    } catch (err) {
+      console.error(`Failed to fetch ${id}:`, err);
+    }
+  };
+
+  const removeCompareCoin = (id: string) => {
+    setCompareCoins(prev => prev.filter(c => c.id !== id));
+  };
 
   useEffect(() => {
     const fetchCoin = async () => {
@@ -44,10 +68,7 @@ export default function CoinPage() {
         }
       } catch (err) {
         console.error('Error fetching coin data:', err);
-        // Mode gracieux: pas d'erreur visible si on a déjà des données
-        if (!coin) {
-          setError('Failed to load coin data. Please try again.');
-        }
+        setError('Failed to load coin data. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -56,7 +77,28 @@ export default function CoinPage() {
     if (coinId) {
       fetchCoin();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coinId, period]);
+
+  // Refetch compare coins when period changes
+  useEffect(() => {
+    const refetchCompareCoins = async () => {
+      const ids = compareCoins.map(c => c.id);
+      if (ids.length === 0) return;
+
+      try {
+        const newData = await Promise.all(
+          ids.map(id => getCoinHistory(id, period))
+        );
+        setCompareCoins(newData);
+      } catch (err) {
+        console.error('Failed to refetch compare coins:', err);
+      }
+    };
+
+    refetchCompareCoins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   if (loading) {
     return (
@@ -149,10 +191,14 @@ export default function CoinPage() {
 
       {/* Price Chart */}
       <div className="glass-card p-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold">Price History</h2>
-            <ChartTypeSelector selected={chartType} onChange={setChartType} />
+            <h2 className="text-lg font-semibold">
+              {compareCoins.length > 0 ? 'Comparaison' : 'Price History'}
+            </h2>
+            {compareCoins.length === 0 && (
+              <ChartTypeSelector selected={chartType} onChange={setChartType} />
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
             {(['1h', '24h', '7d', '30d', '90d', '1y'] as Period[]).map((p) => (
@@ -170,12 +216,73 @@ export default function CoinPage() {
             ))}
           </div>
         </div>
-        <MultiChart 
-          data={coin.prices} 
-          type={chartType}
-          color={priceChange >= 0 ? '#10b981' : '#ef4444'}
-          name={coin.name}
-        />
+
+        {/* Coin selector for comparison */}
+        <div className="mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <button
+              onClick={() => setShowCoinSelector(!showCoinSelector)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Comparer
+            </button>
+            
+            {compareCoins.map((compareCoin) => (
+              <div
+                key={compareCoin.id}
+                className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 rounded text-sm"
+              >
+                <span>{compareCoin.name}</span>
+                <button
+                  onClick={() => removeCompareCoin(compareCoin.id)}
+                  className="hover:text-red-400 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {showCoinSelector && (
+            <div className="glass-card p-3 max-h-60 overflow-y-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {availableCoins
+                  .filter(c => c.id !== coinId && !compareCoins.find(cc => cc.id === c.id))
+                  .slice(0, 20)
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        addCompareC(c.id);
+                        setShowCoinSelector(false);
+                      }}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-700 rounded text-sm text-left transition-colors"
+                    >
+                      {c.image && (
+                        <img src={c.image} alt={c.name} className="w-5 h-5 rounded-full" />
+                      )}
+                      <span className="truncate">{c.name}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {compareCoins.length > 0 ? (
+          <ComparisonChart 
+            coinsData={[coin, ...compareCoins]}
+            mainCoinId={coinId}
+          />
+        ) : (
+          <MultiChart 
+            data={coin.prices} 
+            type={chartType}
+            color={priceChange >= 0 ? '#10b981' : '#ef4444'}
+            name={coin.name}
+          />
+        )}
       </div>
 
       {/* Stats Grid */}

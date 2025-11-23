@@ -12,82 +12,86 @@ import {
   Legend,
 } from 'recharts';
 import { CoinHistoryResponse } from '@/types';
-import { formatPrice, formatRelativeTime } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/utils';
 
 interface ComparisonChartProps {
-  coinsData: { [key: string]: CoinHistoryResponse };
-  normalized?: boolean;
+  coinsData: CoinHistoryResponse[];
+  mainCoinId: string;
 }
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
-export default function ComparisonChart({ coinsData, normalized = false }: ComparisonChartProps) {
+export default function ComparisonChart({ coinsData, mainCoinId }: ComparisonChartProps) {
   const chartData = useMemo(() => {
-    const coinIds = Object.keys(coinsData);
-    if (coinIds.length === 0) return [];
+    if (coinsData.length === 0) return [];
 
-    // Get all timestamps from all coins
-    const allTimestamps = new Set<number>();
-    coinIds.forEach((coinId) => {
-      coinsData[coinId].prices.forEach((point) => {
-        allTimestamps.add(new Date(point.timestamp).getTime());
-      });
-    });
+    // Utiliser les timestamps de la crypto principale comme base
+    const mainCoin = coinsData.find(c => c.id === mainCoinId);
+    if (!mainCoin || mainCoin.prices.length === 0) return [];
 
-    const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+    const baseTimestamps = mainCoin.prices.map(p => new Date(p.timestamp).getTime());
 
-    // Normalize prices if requested (show as % change from start)
-    const normalizedData = coinIds.reduce((acc, coinId) => {
-      const prices = coinsData[coinId].prices;
-      const firstPrice = prices[0]?.price || 1;
-      acc[coinId] = prices.reduce((map, point) => {
-        const timestamp = new Date(point.timestamp).getTime();
-        const value = normalized
-          ? ((point.price - firstPrice) / firstPrice) * 100
-          : point.price;
-        map[timestamp] = value;
-        return map;
-      }, {} as { [key: number]: number });
-      return acc;
-    }, {} as { [coinId: string]: { [timestamp: number]: number } });
+    // Fonction pour trouver le prix le plus proche
+    const findClosestPrice = (prices: any[], targetTime: number) => {
+      let closest = prices[0];
+      let minDiff = Math.abs(new Date(prices[0].timestamp).getTime() - targetTime);
+      
+      for (const price of prices) {
+        const diff = Math.abs(new Date(price.timestamp).getTime() - targetTime);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = price;
+        }
+      }
+      return closest;
+    };
 
-    // Combine all data by timestamp
-    return sortedTimestamps.map((timestamp) => {
-      const dataPoint: any = {
+    // Normaliser: % change depuis le début pour chaque coin
+    return baseTimestamps.map(timestamp => {
+      const point: any = {
         timestamp,
         formattedTime: formatRelativeTime(new Date(timestamp).toISOString()),
       };
 
-      coinIds.forEach((coinId) => {
-        dataPoint[coinId] = normalizedData[coinId][timestamp] || null;
+      coinsData.forEach(coin => {
+        if (coin.prices.length === 0) return;
+        
+        // Trouver le prix le plus proche de ce timestamp
+        const pricePoint = findClosestPrice(coin.prices, timestamp);
+        const initialPrice = coin.prices[0].price;
+        
+        const percentChange = ((pricePoint.price - initialPrice) / initialPrice) * 100;
+        point[coin.id] = percentChange;
       });
 
-      return dataPoint;
+      return point;
     });
-  }, [coinsData, normalized]);
+  }, [coinsData, mainCoinId]);
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
-      const data = payload[0].payload;
       return (
-        <div className="glass-card p-4 border border-gray-700">
-          <p className="text-gray-400 text-xs mb-2">{data.formattedTime}</p>
+        <div className="glass-card p-3 border border-gray-700">
+          <p className="text-gray-400 text-xs mb-2">{payload[0].payload.formattedTime}</p>
           <div className="space-y-1">
             {payload.map((entry: any, index: number) => {
-              const coin = coinsData[entry.dataKey];
+              const coinData = coinsData.find(c => c.id === entry.dataKey);
+              if (!coinData) return null;
+              
               return (
-                <div key={index} className="flex items-center justify-between gap-4">
+                <div key={index} className="flex items-center justify-between gap-4 text-xs">
                   <div className="flex items-center gap-2">
                     <div
                       className="w-2 h-2 rounded-full"
                       style={{ backgroundColor: entry.color }}
                     />
-                    <span className="text-sm font-medium">{coin?.symbol.toUpperCase()}</span>
+                    <span className="text-gray-300">{coinData.symbol.toUpperCase()}</span>
                   </div>
-                  <span className="text-sm font-semibold">
-                    {normalized
-                      ? `${entry.value > 0 ? '+' : ''}${entry.value.toFixed(2)}%`
-                      : formatPrice(entry.value)}
+                  <span
+                    className="font-semibold"
+                    style={{ color: entry.value >= 0 ? '#10b981' : '#ef4444' }}
+                  >
+                    {entry.value >= 0 ? '+' : ''}{entry.value.toFixed(2)}%
                   </span>
                 </div>
               );
@@ -99,67 +103,55 @@ export default function ComparisonChart({ coinsData, normalized = false }: Compa
     return null;
   };
 
-  if (Object.keys(coinsData).length === 0) {
+  if (coinsData.length === 0) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <p className="text-gray-400">Select coins to compare</p>
+      <div className="flex items-center justify-center h-[400px] text-gray-400">
+        Sélectionnez des cryptos à comparer
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-          <XAxis
-            dataKey="timestamp"
-            tickFormatter={(timestamp) => {
-              const date = new Date(timestamp);
-              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            }}
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
+    <ResponsiveContainer width="100%" height={400}>
+      <LineChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+        <XAxis
+          dataKey="timestamp"
+          tickFormatter={(timestamp) => {
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          }}
+          stroke="#9ca3af"
+          style={{ fontSize: '12px' }}
+          tick={{ fill: '#9ca3af' }}
+        />
+        <YAxis
+          tickFormatter={(value) => `${value >= 0 ? '+' : ''}${value.toFixed(0)}%`}
+          stroke="#9ca3af"
+          style={{ fontSize: '12px' }}
+          tick={{ fill: '#9ca3af' }}
+          domain={['auto', 'auto']}
+        />
+        <Tooltip content={<CustomTooltip />} />
+        <Legend
+          wrapperStyle={{ fontSize: '12px' }}
+          formatter={(value) => {
+            const coin = coinsData.find(c => c.id === value);
+            return coin ? `${coin.name} (${coin.symbol.toUpperCase()})` : value;
+          }}
+        />
+        {coinsData.map((coin, index) => (
+          <Line
+            key={coin.id}
+            type="monotone"
+            dataKey={coin.id}
+            stroke={CHART_COLORS[index % CHART_COLORS.length]}
+            strokeWidth={coin.id === mainCoinId ? 3 : 2}
+            dot={false}
+            isAnimationActive={false}
           />
-          <YAxis
-            tickFormatter={(value) =>
-              normalized ? `${value > 0 ? '+' : ''}${value.toFixed(0)}%` : `$${value.toLocaleString()}`
-            }
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
-          />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend
-            wrapperStyle={{ paddingTop: '20px' }}
-            formatter={(value) => {
-              const coin = coinsData[value];
-              return coin ? `${coin.name} (${coin.symbol.toUpperCase()})` : value;
-            }}
-          />
-          {Object.keys(coinsData).map((coinId, index) => (
-            <Line
-              key={coinId}
-              type="monotone"
-              dataKey={coinId}
-              stroke={CHART_COLORS[index % CHART_COLORS.length]}
-              strokeWidth={2}
-              dot={false}
-              connectNulls
-              animationDuration={300}
-            />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-
-      {/* Toggle Normalized View */}
-      <div className="flex justify-end">
-        <button
-          onClick={() => {}}
-          className="text-sm text-gray-400 hover:text-white transition-colors"
-        >
-          {normalized ? '📊 Show Actual Prices' : '📈 Show Percentage Change'}
-        </button>
-      </div>
-    </div>
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
