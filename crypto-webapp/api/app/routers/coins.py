@@ -4,6 +4,8 @@ import requests
 from datetime import datetime, timedelta
 from app.influx_client import get_query_api, get_bucket
 from app.models import Coin, CoinHistory, PaginatedCoins
+from app.direct_api_fetcher import DirectAPIFetcher
+from app.smart_cache import smart_cache
 
 router = APIRouter(prefix="/coins", tags=["coins"])
 
@@ -265,100 +267,104 @@ async def get_coin_history(
     coin_id: str,
     days: int = Query(default=7, ge=0, le=365),
     interval: str = Query(default="1h", regex="^(1m|5m|15m|30m|1h|4h|1d)$"),
-    hours: int = Query(default=0, ge=0, le=168)  # Pour les périodes < 1 jour
+    hours: int = Query(default=0, ge=0, le=168)
 ):
     """
-    Get price history with hybrid approach:
-    1. Try CoinGecko API (fetch all historical data in one call)
-    2. Fallback to InfluxDB if API fails
+    MULTI-SOURCE FALLBACK STRATEGY avec Smart Cache:
     
-    This way we're not dependent on scrapers for historical data!
+    Layer 1: Smart Cache (5min TTL)
+    Layer 2: CoinGecko + CMC weighted average (70/30)
+    Layer 3: InfluxDB (local scraped data)
+    Layer 4: Stale cache (extended TTL during rate limits)
+    
+    Returns metadata: source, stale, rate_limited, spread_pct
     """
     
-    # Calculer le nombre de jours total
-    total_days = days if days > 0 else hours / 24
+    # Calculer le nombre de jours
+    total_days = days if days > 0 else max(1, hours / 24)
+    cache_key = f"coin_history_{coin_id}_{total_days}"
     
-    # STRATÉGIE 1: Essayer CoinGecko API directement (RECOMMANDÉ)
-    print(f"🔍 Fetching {total_days}d of {coin_id} from CoinGecko API...")
-    cg_data = fetch_coingecko_historical(coin_id, int(total_days) if total_days >= 1 else 1)
+    # Layer 1: Check Smart Cache
+    cached = smart_cache.get(cache_key)
+    if cached:
+        print(f"📦 Cache HIT for {coin_id} ({total_days}d)")
+        return cached
     
-    if cg_data['success']:
-        print(f"✅ CoinGecko API: {len(cg_data['prices'])} data points fetched")
-        
-        # Extraire les données
-        coin_info = cg_data.get('coin_info', {})
-        market_data = coin_info.get('market_data', {})
-        
-        # Préparer la réponse
-        coin_data = {
-            "id": coin_id,
-            "name": coin_info.get('name', coin_id.title()),
-            "symbol": coin_info.get('symbol', coin_id[:3]).upper(),
-            "current_price": market_data.get('current_price', {}).get('usd', 0),
-            "market_cap": market_data.get('market_cap', {}).get('usd', 0),
-            "market_cap_rank": market_data.get('market_cap_rank'),
-            "total_volume": market_data.get('total_volume', {}).get('usd', 0),
-            "high_24h": market_data.get('high_24h', {}).get('usd', 0),
-            "low_24h": market_data.get('low_24h', {}).get('usd', 0),
-            "price_change_24h": market_data.get('price_change_24h', 0),
-            "price_change_percentage_24h": market_data.get('price_change_percentage_24h', 0),
-            "price_change_percentage_7d": market_data.get('price_change_percentage_7d', 0),
-            "price_change_percentage_30d": market_data.get('price_change_percentage_30d', 0),
-            "circulating_supply": market_data.get('circulating_supply', 0),
-            "total_supply": market_data.get('total_supply'),
-            "max_supply": market_data.get('max_supply'),
-            "ath": market_data.get('ath', {}).get('usd', 0),
-            "ath_change_percentage": market_data.get('ath_change_percentage', {}).get('usd', 0),
-            "ath_date": market_data.get('ath_date', {}).get('usd', ''),
-            "atl": market_data.get('atl', {}).get('usd', 0),
-            "atl_change_percentage": market_data.get('atl_change_percentage', {}).get('usd', 0),
-            "atl_date": market_data.get('atl_date', {}).get('usd', ''),
-            "description": coin_info.get('description', {}).get('en', ''),
-            "homepage": coin_info.get('links', {}).get('homepage', [''])[0],
-            "whitepaper": coin_info.get('links', {}).get('whitepaper', ''),
-            "blockchain_site": coin_info.get('links', {}).get('blockchain_site', [])[:3],
-        }
-        
-        # Formater les prix pour le frontend
-        prices = []
-        for price_point in cg_data['prices']:
-            prices.append({
-                'timestamp': datetime.fromtimestamp(price_point[0] / 1000).isoformat(),
-                'price': price_point[1]
-            })
-        
-        coin_data['prices'] = prices
-        
-        return coin_data
+    # Layer 2: Multi-source fetch avec weighted average
+    print(f"🌐 [{coin_id}] Multi-source fetch: CoinGecko + CMC...")
     
-    # STRATÉGIE 2: Fallback InfluxDB (données scrapées)
-    print(f"⚠️  CoinGecko API failed, trying InfluxDB fallback...")
+    try:
+        # Fetch current coin data from CoinGecko
+        cb_coingecko = smart_cache.get_circuit_breaker('coingecko')
+        
+        if not cb_coingecko.can_request():
+            print(f"⚠️  CoinGecko circuit breaker OPEN, skipping to fallback")
+            raise Exception("CoinGecko circuit breaker open")
+        
+        coin_data = DirectAPIFetcher.fetch_coingecko_current(coin_id)
+        
+        if coin_data:
+            # Fetch historical prices
+            prices = DirectAPIFetcher.fetch_coingecko_history(coin_id, total_days)
+            
+            if prices:
+                # 🔍 VALIDATION CROISÉE avec CMC (70/30 weighted)
+                validated_prices, metadata = DirectAPIFetcher.cross_validate_with_cmc(coin_id, prices)
+                
+                coin_data['prices'] = validated_prices if validated_prices else prices
+                coin_data['stale'] = False
+                coin_data['rate_limited'] = False
+                coin_data.update(metadata)  # Add source, spread_pct, method
+                
+                # Store in cache
+                smart_cache.set(cache_key, coin_data, ttl=60)  # 1 min cache
+                cb_coingecko.record_success()
+                
+                print(f"✅ Multi-source API: {len(coin_data['prices'])} points ({metadata.get('method')})")
+                return coin_data
+        
+        print(f"⚠️  CoinGecko API returned no data")
+        cb_coingecko.record_failure()
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response and e.response.status_code == 429:
+            print(f"⚠️  Rate limit detected (429) - activating extended cache")
+            cb_coingecko.record_failure()
+            
+            # Try to serve stale cache
+            if cache_key in smart_cache._cache:
+                stale_data = smart_cache._cache[cache_key]['data']
+                stale_data['stale'] = True
+                stale_data['rate_limited'] = True
+                return stale_data
+        else:
+            cb_coingecko.record_failure()
+    except Exception as e:
+        print(f"❌ Multi-source API error: {e}")
+        cb_coingecko.record_failure()
+    
+    # Layer 3: FALLBACK InfluxDB
+    print(f"📊 [{coin_id}] Fallback to InfluxDB...")
     
     query_api = get_query_api()
     bucket = get_bucket()
     
-    # Déterminer la durée InfluxDB
+    # Déterminer time range
     if hours > 0:
         time_range = f"-{hours}h"
     elif days == 0:
         time_range = "-1h"
     else:
         time_range = f"-{days}d"
-
-    # Map interval to InfluxDB duration
+    
     interval_map = {
-        "1m": "1m",
-        "5m": "5m",
-        "15m": "15m",
-        "30m": "30m",
-        "1h": "1h",
-        "4h": "4h",
-        "1d": "1d"
+        "1m": "1m", "5m": "5m", "15m": "15m",
+        "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"
     }
     influx_interval = interval_map.get(interval, "1h")
-
+    
     try:
-        # Get current coin data
+        # Current coin data from InfluxDB
         coin_query = f'''
         from(bucket: "{bucket}")
             |> range(start: -1h)
@@ -381,9 +387,6 @@ async def get_coin_history(
                     "market_cap": float(record.values.get("market_cap", 0)),
                     "market_cap_rank": int(record.values.get("market_cap_rank", 0)) if record.values.get("market_cap_rank") else None,
                     "total_volume": float(record.values.get("volume_24h", 0)),
-                    "high_24h": float(record.values.get("price_usd", 0)),  # Simplified for now
-                    "low_24h": float(record.values.get("price_usd", 0)),   # Simplified for now
-                    "price_change_24h": record.values.get("change_24h", 0),
                     "price_change_percentage_24h": record.values.get("change_24h"),
                     "price_change_percentage_7d": record.values.get("change_7d"),
                     "circulating_supply": record.values.get("circulating_supply", 0),
@@ -399,9 +402,9 @@ async def get_coin_history(
                 break
         
         if not coin_data:
-            raise HTTPException(status_code=404, detail=f"Coin '{coin_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Coin '{coin_id}' not found in InfluxDB")
         
-        # Calculate 24h high/low from price history
+        # Calculate high/low 24h
         high_low_query = f'''
         from(bucket: "{bucket}")
             |> range(start: -24h)
@@ -411,20 +414,16 @@ async def get_coin_history(
         '''
         
         high_low_tables = query_api.query(high_low_query)
-        prices_24h = []
-        for table in high_low_tables:
-            for record in table.records:
-                prices_24h.append(float(record.get_value()))
+        prices_24h = [float(r.get_value()) for t in high_low_tables for r in t.records]
         
         if prices_24h:
             coin_data["high_24h"] = max(prices_24h)
             coin_data["low_24h"] = min(prices_24h)
         else:
-            # Fallback to current price if no history
             coin_data["high_24h"] = coin_data["current_price"]
             coin_data["low_24h"] = coin_data["current_price"]
         
-        # Enrichir avec les infos CoinGecko
+        # Enrichir avec infos CoinGecko
         coingecko_info = get_coingecko_info(coin_id)
         coin_data.update(coingecko_info)
         
@@ -436,29 +435,38 @@ async def get_coin_history(
             |> filter(fn: (r) => r.crypto_id == "{coin_id}")
             |> filter(fn: (r) => r._field == "price_usd")
             |> aggregateWindow(every: {influx_interval}, fn: mean, createEmpty: false)
-            |> yield(name: "mean")
         '''
-
+        
         history_tables = query_api.query(history_query)
-
-        prices = []
-        for table in history_tables:
-            for record in table.records:
-                prices.append({
-                    "timestamp": record.get_time().isoformat(),
-                    "price": float(record.get_value())
-                })
-
-        # Sort by timestamp
+        prices = [
+            {"timestamp": r.get_time().isoformat(), "price": float(r.get_value())}
+            for t in history_tables for r in t.records
+        ]
         prices.sort(key=lambda x: x["timestamp"])
         
-        # Combine coin data with price history
-        return {
-            **coin_data,
-            "prices": prices
-        }
-
+        coin_data["prices"] = prices
+        coin_data["stale"] = False
+        coin_data["rate_limited"] = False
+        coin_data["source"] = "influxdb_fallback"
+        coin_data["method"] = "influxdb"
+        
+        # Cache for 2 minutes (shorter TTL for fallback data)
+        smart_cache.set(cache_key, coin_data, ttl=120)
+        
+        print(f"📊 InfluxDB fallback: {len(prices)} points")
+        
+        return coin_data
+        
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error querying InfluxDB: {str(e)}")
+        # Layer 4: Try stale cache as last resort
+        if cache_key in smart_cache._cache:
+            print(f"📦 LAST RESORT: Serving stale cache for {coin_id}")
+            stale_data = smart_cache._cache[cache_key]['data']
+            stale_data['stale'] = True
+            stale_data['rate_limited'] = False
+            stale_data['source'] = 'cache_stale'
+            return stale_data
+        
+        raise HTTPException(status_code=500, detail=f"All data sources failed: {str(e)}")

@@ -68,6 +68,13 @@ export interface CoinHistoryResponse {
   whitepaper?: string;
   blockchain_site?: string[];
   prices: PricePoint[];
+  // Multi-source metadata
+  stale?: boolean;
+  rate_limited?: boolean;
+  source?: string;
+  method?: string;
+  spread_pct?: number;
+  cmc_validated?: boolean;
 }
 
 // News article

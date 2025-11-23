@@ -207,6 +207,27 @@ export async function getFearGreed(): Promise<FearGreedResponse> {
 }
 
 /**
+ * Get bootstrap data (coins + global stats + fear/greed in one call)
+ * Uses backend's optimized bootstrap endpoint
+ */
+export async function getBootstrap(
+  limit: number = 50,
+  sparkline: boolean = true
+): Promise<{
+  coins: CoinSummary[];
+  global: GlobalStats | null;
+  fearGreed: FearGreedResponse | null;
+  stale?: boolean;
+  rate_limited?: boolean;
+}> {
+  const searchParams = new URLSearchParams();
+  searchParams.append('limit', limit.toString());
+  searchParams.append('sparkline', sparkline.toString());
+
+  return apiFetch(`/api/v1/bootstrap?${searchParams.toString()}`);
+}
+
+/**
  * Search for coins by name or symbol
  */
 export async function searchCoins(query: string): Promise<CoinSummary[]> {

@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ExternalLink, Globe, TrendingUp, TrendingDown } from 'lucide-react';
-import InteractiveChart from '@/components/InteractiveChart';
+import MultiChart, { ChartType } from '@/components/MultiChart';
+import ChartTypeSelector from '@/components/ChartTypeSelector';
 import PriceRangeBar from '@/components/PriceRangeBar';
 import { CoinHistoryResponse, Period } from '@/types';
 import { getCoinHistory } from '@/lib/api';
@@ -23,16 +24,38 @@ export default function CoinPage() {
 
   const [coin, setCoin] = useState<CoinHistoryResponse | null>(null);
   const [period, setPeriod] = useState<Period>('7d');
+  const [chartType, setChartType] = useState<ChartType>('line');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dataWarning, setDataWarning] = useState<{ type: 'stale' | 'rate_limited' | 'fallback' | null, message: string | null }>({ type: null, message: null });
 
   useEffect(() => {
     const fetchCoin = async () => {
       try {
         setLoading(true);
         setError(null);
+        setDataWarning({ type: null, message: null });
+        
         const data = await getCoinHistory(coinId, period);
         setCoin(data);
+        
+        // Check data quality and show warnings
+        if (data.stale) {
+          setDataWarning({
+            type: 'stale',
+            message: '⚠️ Showing cached data (API rate limit reached). Data will refresh automatically in a few minutes.'
+          });
+        } else if (data.rate_limited) {
+          setDataWarning({
+            type: 'rate_limited',
+            message: '⏳ API rate limit detected. Refreshing from cache...'
+          });
+        } else if (data.source === 'influxdb_fallback') {
+          setDataWarning({
+            type: 'fallback',
+            message: 'ℹ️ Showing historical data from local database (live API temporarily unavailable).'
+          });
+        }
       } catch (err) {
         console.error('Error fetching coin data:', err);
         setError('Failed to load coin data. Please try again.');
@@ -79,6 +102,18 @@ export default function CoinPage() {
 
   return (
     <div className="space-y-6">
+      {/* Data Quality Warning Banner */}
+      {dataWarning.message && (
+        <div className={`
+          p-4 rounded-lg border
+          ${dataWarning.type === 'stale' ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-200' : ''}
+          ${dataWarning.type === 'rate_limited' ? 'bg-orange-500/10 border-orange-500/50 text-orange-200' : ''}
+          ${dataWarning.type === 'fallback' ? 'bg-blue-500/10 border-blue-500/50 text-blue-200' : ''}
+        `}>
+          <p className="text-sm">{dataWarning.message}</p>
+        </div>
+      )}
+
       {/* Back Button */}
       <Link
         href="/"
@@ -135,9 +170,12 @@ export default function CoinPage() {
 
       {/* Price Chart */}
       <div className="glass-card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Price History</h2>
-          <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-semibold">Price History</h2>
+            <ChartTypeSelector selected={chartType} onChange={setChartType} />
+          </div>
+          <div className="flex gap-2 flex-wrap">
             {(['1h', '24h', '7d', '30d', '90d', '1y'] as Period[]).map((p) => (
               <button
                 key={p}
@@ -153,7 +191,12 @@ export default function CoinPage() {
             ))}
           </div>
         </div>
-        <InteractiveChart prices={coin.prices} />
+        <MultiChart 
+          data={coin.prices} 
+          type={chartType}
+          color={priceChange >= 0 ? '#10b981' : '#ef4444'}
+          name={coin.name}
+        />
       </div>
 
       {/* Stats Grid */}

@@ -1,81 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import GlobalStatsCards from '@/components/GlobalStatsCards';
 import FearGreedGauge from '@/components/FearGreedGauge';
 import CryptoTable from '@/components/CryptoTable';
 import NewsSection from '@/components/NewsSection';
-import { GlobalStats, CoinSummary, NewsResponse, FearGreedResponse } from '@/types';
-import { getGlobal, getCoins, getNews, getFearGreed } from '@/lib/api';
+import { useBootstrap, useNews } from '@/lib/hooks';
 
 export default function Dashboard() {
-  const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
-  const [coins, setCoins] = useState<CoinSummary[]>([]);
-  const [news, setNews] = useState<NewsResponse | null>(null);
-  const [fearGreed, setFearGreed] = useState<FearGreedResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // 🚀 SWR Hooks - Appels dédupliqués + cache intelligent
+  const { coins, global: globalStats, fearGreed, isLoading: bootstrapLoading, stale, rateLimited } = useBootstrap(50, true);
+  const { articles: news, isLoading: newsLoading } = useNews(6);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const [globalData, coinsData, newsData, fearGreedData] = await Promise.allSettled([
-          getGlobal(),
-          getCoins({ per_page: 50, sparkline: true }),
-          getNews({ page_size: 6 }),
-          getFearGreed(),
-        ]);
-
-        if (globalData.status === 'fulfilled') {
-          setGlobalStats(globalData.value);
-        }
-
-        if (coinsData.status === 'fulfilled') {
-          setCoins(coinsData.value);
-        } else {
-          console.error('Failed to fetch coins:', coinsData.reason);
-        }
-
-        if (newsData.status === 'fulfilled') {
-          setNews(newsData.value);
-        }
-
-        if (fearGreedData.status === 'fulfilled') {
-          setFearGreed(fearGreedData.value);
-        }
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err);
-        setError('Failed to load dashboard data. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-
-    // Refresh data every 60 seconds
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="glass-card p-8 text-center">
-          <p className="text-red-400 mb-4">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const loading = bootstrapLoading || newsLoading;
 
   return (
     <div className="space-y-6">
@@ -83,6 +19,16 @@ export default function Dashboard() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold gradient-text mb-2">Market Overview</h1>
         <p className="text-gray-400">Real-time cryptocurrency market data and analytics</p>
+        {stale && (
+          <div className="mt-3 text-sm px-3 py-2 rounded bg-yellow-500/10 border border-yellow-600 text-yellow-300 inline-flex items-center gap-2">
+            <span>⚠️ Données en cache (stale) – rate limit externe, affichage temporaire.</span>
+          </div>
+        )}
+        {rateLimited && !stale && (
+          <div className="mt-3 text-sm px-3 py-2 rounded bg-orange-500/10 border border-orange-600 text-orange-300 inline-flex items-center gap-2">
+            <span>⏳ Rate limit API externe – rechargement auto dans quelques secondes.</span>
+          </div>
+        )}
       </div>
 
       {/* Global Stats and Fear & Greed */}

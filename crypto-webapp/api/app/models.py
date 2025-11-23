@@ -48,6 +48,9 @@ class CoinDetail(Coin):
     homepage: Optional[str] = None
     whitepaper: Optional[str] = None
     blockchain_site: Optional[list] = []
+    prices: Optional[list] = []  # Historical price data
+    stale: bool | None = None  # indicates data served from cache
+    rate_limited: bool | None = None  # indicates upstream rate limit encountered
 
 
 class CoinHistory(BaseModel):
@@ -104,3 +107,13 @@ class PaginatedCoins(BaseModel):
     page: int
     limit: int
     total_pages: int
+
+
+class BootstrapResponse(BaseModel):
+    """Réponse agrégée pour réduire le nombre d'appels frontend."""
+    coins: list[Coin]
+    global_stats: GlobalStats | None
+    fear_greed: FearGreedIndex | None
+    timestamp: datetime
+    stale: bool | None = None
+    rate_limited: bool | None = None

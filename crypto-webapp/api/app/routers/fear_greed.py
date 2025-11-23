@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.influx_client import get_query_api, get_bucket
+import requests
 from app.models import FearGreedIndex
 
 router = APIRouter(tags=["fear-greed"])
@@ -21,33 +21,29 @@ def classify_fear_greed(value: int) -> str:
 
 @router.get("/fear-greed", response_model=FearGreedIndex)
 async def get_fear_greed():
-    """Get the latest fear and greed index."""
-    query_api = get_query_api()
-    bucket = get_bucket()
-
+    """
+    Get fear & greed index directly from Alternative.me API.
+    NO INFLUXDB REQUIRED!
+    """
     try:
-        query = f'''
-        from(bucket: "{bucket}")
-            |> range(start: -24h)
-            |> filter(fn: (r) => r._measurement == "fear_greed_index")
-            |> filter(fn: (r) => r._field == "value")
-            |> last()
-        '''
-
-        tables = query_api.query(query)
-
-        for table in tables:
-            for record in table.records:
-                value = int(record.get_value())
-                return FearGreedIndex(
-                    value=value,
-                    classification=classify_fear_greed(value),
-                    timestamp=record.get_time()
-                )
-
-        raise HTTPException(status_code=404, detail="Fear and Greed index not found")
-
-    except HTTPException:
-        raise
+        url = "https://api.alternative.me/fng/"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            # Fallback to neutral if API fails
+            return FearGreedIndex(value=50, classification="Neutral", timestamp="")
+        
+        data = response.json().get("data", [{}])[0]
+        value = int(data.get("value", 50))
+        
+        return FearGreedIndex(
+            value=value,
+            classification=classify_fear_greed(value),
+            timestamp=data.get("timestamp", "")
+        )
+        
+    except requests.RequestException:
+        # Fallback to neutral if API fails
+        return FearGreedIndex(value=50, classification="Neutral", timestamp="")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error querying InfluxDB: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")

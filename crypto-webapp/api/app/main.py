@@ -5,7 +5,7 @@ from datetime import datetime
 from app.config import API_TITLE, API_VERSION, API_DESCRIPTION
 from app.influx_client import InfluxClientManager
 from app.models import HealthResponse
-from app.routers import coins, global_stats, news, fear_greed, analytics
+from app.routers import coins, global_stats, news, fear_greed, analytics, bootstrap
 
 # Create FastAPI application
 app = FastAPI(
@@ -25,6 +25,7 @@ app.add_middleware(
 
 # Include routers under a common API prefix
 api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(bootstrap.router)
 api_v1.include_router(coins.router)
 api_v1.include_router(global_stats.router)
 api_v1.include_router(news.router)
