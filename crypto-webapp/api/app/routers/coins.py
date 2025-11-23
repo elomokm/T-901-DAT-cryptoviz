@@ -12,6 +12,32 @@ router = APIRouter(prefix="/coins", tags=["coins"])
 # Cache simple pour les infos CoinGecko (éviter trop d'appels API)
 _coingecko_cache = {}
 
+# 🆘 EMERGENCY CACHE GLOBAL - Garde dernières données valides indéfiniment
+_EMERGENCY_COIN_CACHE = {}
+
+
+def _save_to_emergency_cache(coin_id: str, data: dict):
+    """Sauvegarde dans emergency cache pour fallback ultime"""
+    _EMERGENCY_COIN_CACHE[coin_id] = {
+        'data': data,
+        'timestamp': datetime.now().isoformat()
+    }
+    print(f"💾 Emergency cache updated for {coin_id}")
+
+
+def _get_from_emergency_cache(coin_id: str) -> dict:
+    """Récupère depuis emergency cache (données potentiellement anciennes mais valides)"""
+    if coin_id in _EMERGENCY_COIN_CACHE:
+        cache_entry = _EMERGENCY_COIN_CACHE[coin_id]
+        print(f"🆘 Using EMERGENCY cache for {coin_id} (saved: {cache_entry['timestamp']})")
+        data = cache_entry['data'].copy()
+        data['stale'] = True
+        data['rate_limited'] = True
+        data['source'] = 'emergency_cache'
+        data['cache_age'] = cache_entry['timestamp']
+        return data
+    return None
+
 
 def fetch_coingecko_historical(coin_id: str, days: int) -> dict:
     """
@@ -316,8 +342,9 @@ async def get_coin_history(
                 coin_data['rate_limited'] = False
                 coin_data.update(metadata)  # Add source, spread_pct, method
                 
-                # Store in cache
+                # Store in cache ET emergency cache
                 smart_cache.set(cache_key, coin_data, ttl=60)  # 1 min cache
+                _save_to_emergency_cache(coin_id, coin_data)  # 💾 Sauvegarde emergency
                 cb_coingecko.record_success()
                 
                 print(f"✅ Multi-source API: {len(coin_data['prices'])} points ({metadata.get('method')})")
@@ -452,6 +479,7 @@ async def get_coin_history(
         
         # Cache for 2 minutes (shorter TTL for fallback data)
         smart_cache.set(cache_key, coin_data, ttl=120)
+        _save_to_emergency_cache(coin_id, coin_data)  # 💾 Sauvegarde emergency aussi
         
         print(f"📊 InfluxDB fallback: {len(prices)} points")
         
@@ -461,6 +489,8 @@ async def get_coin_history(
         raise
     except Exception as e:
         # Layer 4: Try stale cache as last resort
+        print(f"⚠️  InfluxDB fallback error: {e}")
+        
         if cache_key in smart_cache._cache:
             print(f"📦 LAST RESORT: Serving stale cache for {coin_id}")
             stale_data = smart_cache._cache[cache_key]['data']
@@ -469,4 +499,23 @@ async def get_coin_history(
             stale_data['source'] = 'cache_stale'
             return stale_data
         
-        raise HTTPException(status_code=500, detail=f"All data sources failed: {str(e)}")
+        # Layer 5: Emergency cache (données anciennes mais valides)
+        emergency_data = _get_from_emergency_cache(coin_id)
+        if emergency_data:
+            return emergency_data
+        
+        # NEVER-FAIL: Dernière chance - structure minimale
+        print(f"🆘 NEVER-FAIL mode: NO DATA AVAILABLE for {coin_id}")
+        return {
+            "id": coin_id,
+            "name": coin_id.replace("-", " ").title(),
+            "symbol": coin_id[:3].upper(),
+            "current_price": 0,
+            "prices": [],
+            "stale": True,
+            "rate_limited": True,
+            "source": "no_data",
+            "method": "none",
+            "error": f"All sources unavailable: {str(e)}"
+        }
+

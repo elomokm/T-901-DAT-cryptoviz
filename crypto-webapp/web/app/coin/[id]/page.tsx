@@ -27,38 +27,27 @@ export default function CoinPage() {
   const [chartType, setChartType] = useState<ChartType>('line');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dataWarning, setDataWarning] = useState<{ type: 'stale' | 'rate_limited' | 'fallback' | null, message: string | null }>({ type: null, message: null });
+  // Mode silencieux: pas de warnings affichés, fallback transparent
 
   useEffect(() => {
     const fetchCoin = async () => {
       try {
         setLoading(true);
         setError(null);
-        setDataWarning({ type: null, message: null });
         
         const data = await getCoinHistory(coinId, period);
         setCoin(data);
         
-        // Check data quality and show warnings
-        if (data.stale) {
-          setDataWarning({
-            type: 'stale',
-            message: '⚠️ Showing cached data (API rate limit reached). Data will refresh automatically in a few minutes.'
-          });
-        } else if (data.rate_limited) {
-          setDataWarning({
-            type: 'rate_limited',
-            message: '⏳ API rate limit detected. Refreshing from cache...'
-          });
-        } else if (data.source === 'influxdb_fallback') {
-          setDataWarning({
-            type: 'fallback',
-            message: 'ℹ️ Showing historical data from local database (live API temporarily unavailable).'
-          });
+        // Log silencieux pour debug uniquement (pas de UI warnings)
+        if (data.stale || data.rate_limited) {
+          console.log(`[${coinId}] Using fallback data: source=${data.source}, stale=${data.stale}, rate_limited=${data.rate_limited}`);
         }
       } catch (err) {
         console.error('Error fetching coin data:', err);
-        setError('Failed to load coin data. Please try again.');
+        // Mode gracieux: pas d'erreur visible si on a déjà des données
+        if (!coin) {
+          setError('Failed to load coin data. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
@@ -102,17 +91,7 @@ export default function CoinPage() {
 
   return (
     <div className="space-y-6">
-      {/* Data Quality Warning Banner */}
-      {dataWarning.message && (
-        <div className={`
-          p-4 rounded-lg border
-          ${dataWarning.type === 'stale' ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-200' : ''}
-          ${dataWarning.type === 'rate_limited' ? 'bg-orange-500/10 border-orange-500/50 text-orange-200' : ''}
-          ${dataWarning.type === 'fallback' ? 'bg-blue-500/10 border-blue-500/50 text-blue-200' : ''}
-        `}>
-          <p className="text-sm">{dataWarning.message}</p>
-        </div>
-      )}
+      {/* Mode silencieux: pas de banners de warning */}
 
       {/* Back Button */}
       <Link

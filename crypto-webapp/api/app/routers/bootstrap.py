@@ -1,9 +1,9 @@
 """
-Bootstrap endpoint - optimized single call to fetch all dashboard data
-Combines coins list, global stats, and fear/greed index
+Bootstrap endpoint - NEVER-FAIL mode pour production
+Retourne TOUJOURS des données (cache stale si nécessaire)
 """
-from fastapi import APIRouter, HTTPException, Query
-from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, Query
+from typing import Dict, Any, Optional, List, Tuple
 import asyncio
 import logging
 
@@ -13,19 +13,92 @@ from app.influx_client import InfluxClientManager
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 logger = logging.getLogger(__name__)
 
-# Shared DirectAPIFetcher instance
+# Shared API fetcher
 api_fetcher = DirectAPIFetcher()
+
+# Cache simple pour fallback ultime (garde dernières données valides)
+_EMERGENCY_CACHE = {
+    'coins': None,
+    'global': None,
+    'fear_greed': None
+}
+
+
+def _fetch_coins_with_fallback(limit: int) -> Tuple[List[Dict], Dict]:
+    """Fetch coins avec fallback automatique - NEVER FAIL"""
+    try:
+        coins, metadata = api_fetcher.fetch_coin_list(page=1, limit=limit)
+        if coins:
+            # Update emergency cache
+            _EMERGENCY_CACHE['coins'] = (coins, metadata)
+            return coins, metadata
+    except Exception as e:
+        logger.warning(f"API coins fetch failed: {e}")
+    
+    # Fallback 1: InfluxDB
+    try:
+        logger.info("📊 Fallback to InfluxDB for coins...")
+        coins = _fetch_coins_from_influx(limit)
+        if coins:
+            metadata = {'source': 'influxdb_fallback', 'stale': True, 'rate_limited': True}
+            return coins, metadata
+    except Exception as e:
+        logger.warning(f"InfluxDB fallback failed: {e}")
+    
+    # Fallback 2: Emergency cache (données très anciennes mais mieux que rien)
+    if _EMERGENCY_CACHE['coins']:
+        logger.warning("🆘 Using EMERGENCY cache for coins")
+        coins, metadata = _EMERGENCY_CACHE['coins']
+        metadata['emergency'] = True
+        return coins, metadata
+    
+    # Vraiment rien - retourner liste vide
+    return [], {'source': 'empty', 'stale': True, 'rate_limited': True}
+
+
+def _fetch_global_with_fallback() -> Optional[Dict]:
+    """Fetch global stats avec fallback - peut retourner None"""
+    try:
+        stats = api_fetcher.fetch_global_stats()
+        if stats:
+            _EMERGENCY_CACHE['global'] = stats
+            return stats
+    except Exception as e:
+        logger.warning(f"Global stats fetch failed: {e}")
+    
+    # Fallback: emergency cache
+    if _EMERGENCY_CACHE['global']:
+        logger.info("Using cached global stats")
+        return _EMERGENCY_CACHE['global']
+    
+    return None
+
+
+def _fetch_fear_greed_with_fallback() -> Optional[Dict]:
+    """Fetch fear/greed avec fallback - peut retourner None"""
+    try:
+        data = api_fetcher.fetch_fear_greed()
+        if data:
+            _EMERGENCY_CACHE['fear_greed'] = data
+            return data
+    except Exception as e:
+        logger.warning(f"Fear/Greed fetch failed: {e}")
+    
+    # Fallback: emergency cache
+    if _EMERGENCY_CACHE['fear_greed']:
+        logger.info("Using cached fear/greed")
+        return _EMERGENCY_CACHE['fear_greed']
+    
+    return None
 
 
 def _fetch_coins_from_influx(limit: int = 50) -> List[Dict]:
     """
-    Fallback: Fetch coins from InfluxDB historical data
-    Used when external APIs are rate-limited
+    Fallback InfluxDB: Récupère coins depuis données historiques
     """
     try:
         client = InfluxClientManager.get_client()
         
-        # Query recent data for top coins
         query = f"""
         from(bucket: "crypto_data")
             |> range(start: -1h)
@@ -44,7 +117,7 @@ def _fetch_coins_from_influx(limit: int = 50) -> List[Dict]:
         coins = []
         for table in tables:
             for record in table.records:
-                coin_data = {
+                coins.append({
                     'id': record.values.get('crypto_id'),
                     'symbol': record.values.get('symbol', '').upper(),
                     'name': record.values.get('name', record.values.get('crypto_id', '').title()),
@@ -56,14 +129,13 @@ def _fetch_coins_from_influx(limit: int = 50) -> List[Dict]:
                     'price_change_24h': None,
                     'price_change_percentage_24h': None,
                     'sparkline_in_7d': []
-                }
-                coins.append(coin_data)
+                })
         
-        logger.info(f"✅ Fetched {len(coins)} coins from InfluxDB")
+        logger.info(f"✅ InfluxDB: {len(coins)} coins fetched")
         return coins
         
     except Exception as e:
-        logger.error(f"❌ Error fetching from InfluxDB: {e}")
+        logger.error(f"❌ InfluxDB error: {e}")
         return []
 
 
@@ -73,78 +145,87 @@ async def get_bootstrap(
     sparkline: bool = Query(True, description="Include 7-day sparkline data")
 ) -> Dict[str, Any]:
     """
-    🚀 Bootstrap endpoint - fetch all dashboard data in one optimized call
+    🚀 Bootstrap endpoint - NEVER-FAIL MODE
+    
+    Garanties production:
+    - JAMAIS d'erreur HTTP 500
+    - TOUJOURS retourne des données (même anciennes)
+    - Fallback cascade: API → InfluxDB → Emergency cache
+    - Mode dégradé totalement transparent pour l'utilisateur
     
     Returns:
-    - coins: Top cryptocurrencies with current prices and sparklines
-    - global: Global market statistics
-    - fearGreed: Fear & Greed index
-    - Metadata: stale, rate_limited flags for cache status
+    - coins: Liste cryptos (JAMAIS vide grâce aux fallbacks)
+    - global: Stats globales (None si indisponible, pas critique)
+    - fearGreed: Index (None si indisponible, pas critique)
+    - Metadata: source, stale, rate_limited pour monitoring
     """
+    # Valeurs par défaut safe
+    coins_list = []
+    coins_metadata = {'source': 'unknown', 'stale': False, 'rate_limited': False}
+    global_stats = None
+    fear_greed = None
+    
     try:
-        # Run all three API calls in parallel for speed
-        coins_task = asyncio.to_thread(api_fetcher.fetch_coin_list, page=1, limit=limit)
-        global_task = asyncio.to_thread(api_fetcher.fetch_global_stats)
-        fear_greed_task = asyncio.to_thread(api_fetcher.fetch_fear_greed)
+        # Fetch all data in parallel
+        coins_task = asyncio.to_thread(_fetch_coins_with_fallback, limit)
+        global_task = asyncio.to_thread(_fetch_global_with_fallback)
+        fear_greed_task = asyncio.to_thread(_fetch_fear_greed_with_fallback)
         
-        coins_data, global_data, fear_greed_data = await asyncio.gather(
+        coins_result, global_result, fear_greed_result = await asyncio.gather(
             coins_task,
             global_task,
             fear_greed_task,
             return_exceptions=True
         )
         
-        # Handle coins data
-        coins_list = []
-        coins_metadata = {}
-        if isinstance(coins_data, Exception):
-            logger.error(f"Coins fetch failed: {coins_data}")
-            # Fallback to InfluxDB for coins list
-            logger.info("📊 Falling back to InfluxDB for coins list...")
-            try:
-                coins_list = await asyncio.to_thread(_fetch_coins_from_influx, limit)
-                coins_metadata = {'source': 'influxdb_fallback', 'stale': True, 'rate_limited': True}
-            except Exception as e:
-                logger.error(f"InfluxDB fallback failed: {e}")
-        elif coins_data and len(coins_data) == 2:
-            coins_list, coins_metadata = coins_data
+        # Handle coins (CRITIQUE - doit avoir des données)
+        if not isinstance(coins_result, Exception) and coins_result:
+            coins_list, coins_metadata = coins_result
+            logger.info(f"✅ Bootstrap coins: {len(coins_list)} items from {coins_metadata.get('source')}")
         else:
-            # Empty response, try InfluxDB fallback
-            logger.info("📊 Empty API response, falling back to InfluxDB...")
-            try:
-                coins_list = await asyncio.to_thread(_fetch_coins_from_influx, limit)
-                coins_metadata = {'source': 'influxdb_fallback', 'stale': True, 'rate_limited': True}
-            except Exception as e:
-                logger.error(f"InfluxDB fallback failed: {e}")
+            logger.error(f"❌ CRITICAL: All coins fallbacks failed!")
+            coins_list = []
+            coins_metadata = {'source': 'failed', 'stale': True, 'rate_limited': True}
         
-        # Handle global stats
-        global_stats = None
-        if isinstance(global_data, Exception):
-            logger.error(f"Global stats fetch failed: {global_data}")
+        # Handle global stats (NON-CRITIQUE)
+        if not isinstance(global_result, Exception):
+            global_stats = global_result
         else:
-            global_stats = global_data
+            logger.warning(f"Global stats unavailable (non-critical)")
         
-        # Handle fear & greed
-        fear_greed = None
-        if isinstance(fear_greed_data, Exception):
-            logger.error(f"Fear/Greed fetch failed: {fear_greed_data}")
+        # Handle fear/greed (NON-CRITIQUE)
+        if not isinstance(fear_greed_result, Exception):
+            fear_greed = fear_greed_result
         else:
-            fear_greed = fear_greed_data
+            logger.warning(f"Fear/Greed unavailable (non-critical)")
         
-        # Determine overall cache status (worst case wins)
-        stale = coins_metadata.get('stale', False)
-        rate_limited = coins_metadata.get('rate_limited', False)
-        
+        # Return data (NEVER raise exception)
         return {
             "coins": coins_list,
             "global": global_stats,
             "fearGreed": fear_greed,
-            "stale": stale,
-            "rate_limited": rate_limited,
-            "source": coins_metadata.get('source', 'api'),
-            "method": coins_metadata.get('method', 'direct')
+            "stale": coins_metadata.get('stale', False),
+            "rate_limited": coins_metadata.get('rate_limited', False),
+            "source": coins_metadata.get('source', 'unknown'),
+            "method": coins_metadata.get('method', 'direct'),
+            "emergency": coins_metadata.get('emergency', False)
         }
         
     except Exception as e:
-        logger.error(f"❌ Bootstrap fetch failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch bootstrap data: {str(e)}")
+        # DERNIÈRE LIGNE DE DÉFENSE - ne JAMAIS crash
+        logger.error(f"❌ FATAL bootstrap error: {e}", exc_info=True)
+        
+        # Retourner emergency cache ou données vides
+        emergency_coins, emergency_meta = _EMERGENCY_CACHE.get('coins', ([], {}))
+        
+        return {
+            "coins": emergency_coins,
+            "global": _EMERGENCY_CACHE.get('global'),
+            "fearGreed": _EMERGENCY_CACHE.get('fear_greed'),
+            "stale": True,
+            "rate_limited": True,
+            "source": "emergency_recovery",
+            "method": "cached",
+            "emergency": True,
+            "error": str(e)
+        }

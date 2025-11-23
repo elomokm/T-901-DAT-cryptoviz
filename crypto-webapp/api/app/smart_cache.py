@@ -75,29 +75,40 @@ class SmartCache:
         self.coingecko_base = "https://api.coingecko.com/api/v3"
         self.coinpaprika_base = "https://api.coinpaprika.com/v1"
     
-    def get(self, key: str) -> Optional[Dict]:
-        """Récupère donnée du cache"""
+    def get(self, key: str, allow_stale: bool = True) -> Optional[Dict]:
+        """
+        Récupère donnée du cache
+        Args:
+            key: Cache key
+            allow_stale: Si True, retourne données expirées plutôt que None (fallback silencieux)
+        """
         with self._lock:
             if key not in self._cache:
                 return None
             
             entry = self._cache[key]
             now = time.time()
+            age = int(now - entry['timestamp'])
             
-            # Fresh data
-            if (now - entry['timestamp']) < entry['ttl']:
+            # Fresh data (dans le TTL)
+            if age < entry['ttl']:
                 return entry['data']
             
-            # Stale but usable (within extended window)
-            if (now - entry['timestamp']) < CACHE_TTL_STALE:
-                print(f"📦 Serving STALE cache for {key} (age: {int(now - entry['timestamp'])}s)")
+            # Stale mais utilisable (extended window - jusqu'à 10 min)
+            if allow_stale and age < CACHE_TTL_STALE:
+                print(f"📦 Serving STALE cache for {key} (age: {age}s) - fallback silencieux")
                 return entry['data']
             
-            # Expired
+            # Très vieux mais GARDE-LE quand même (ne pas supprimer = fallback ultime)
+            if allow_stale and age < 3600:  # 1 heure max
+                print(f"🆘 EMERGENCY fallback for {key} (age: {age}s) - dernière chance")
+                return entry['data']
+            
+            # Vraiment trop vieux (> 1h) - on supprime
             del self._cache[key]
             return None
     
-    def set(self, key: str, data: Any, ttl: int = CACHE_TTL_DEFAULT, is_rate_limited: bool = False):
+    def set(self, key: str, data: Any, ttl: int = CACHE_TTL_DEFAULT, is_rate_limited: bool = False, force: bool = False):
         """Stocke donnée avec TTL adaptatif"""
         with self._lock:
             if is_rate_limited:
@@ -124,18 +135,19 @@ class SmartCache:
         key: str,
         primary_fetcher: Callable,
         fallback_fetchers: list[Callable] = None,
-        ttl: int = CACHE_TTL_DEFAULT
+        ttl: int = CACHE_TTL_DEFAULT,
+        never_fail: bool = True  # Mode prod: JAMAIS d'erreur, toujours retourner quelque chose
     ) -> Optional[Dict]:
         """
-        Stratégie complète:
-        1. Vérifier cache
+        Stratégie ultra-résiliente:
+        1. Vérifier cache (fresh)
         2. Essayer API primaire (CoinGecko)
         3. Si échec/rate limit, essayer APIs secondaires (CMC, CoinPaprika)
-        4. Retourner stale cache si toutes APIs échouent
-        5. Adapter TTL selon rate limiting
+        4. Retourner stale cache (même très vieux) si toutes APIs échouent
+        5. Mode never_fail: TOUJOURS retourner des données (même anciennes)
         """
-        # 1. Check cache first
-        cached = self.get(key)
+        # 1. Check cache first (fresh data)
+        cached = self.get(key, allow_stale=False)  # Fresh only
         if cached:
             return cached
         
@@ -151,12 +163,8 @@ class SmartCache:
                     return data
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
-                    print(f"⚠️  Rate limited on primary API")
+                    print(f"⚠️  Rate limited on primary API - fallback mode activated")
                     cb_primary.record_failure()
-                    # Extend cache TTL for existing entries
-                    if key in self._cache:
-                        print(f"📦 Returning stale cache during rate limit")
-                        return self._cache[key]['data']
                 else:
                     cb_primary.record_failure()
             except Exception as e:
@@ -169,17 +177,20 @@ class SmartCache:
                 try:
                     data = fetcher()
                     if data:
-                        self.set(key, data, ttl=ttl)
+                        self.set(key, data, ttl=ttl, is_rate_limited=True)
                         print(f"✅ Fallback API #{idx+1} success: {key}")
                         return data
                 except Exception as e:
                     print(f"❌ Fallback API #{idx+1} error: {e}")
         
-        # 4. Return stale cache if available
-        if key in self._cache:
-            print(f"📦 All APIs failed, serving STALE cache for {key}")
-            return self._cache[key]['data']
+        # 4. FALLBACK ULTIME: Retourner stale cache même très vieux (never_fail mode)
+        if never_fail:
+            stale_data = self.get(key, allow_stale=True)
+            if stale_data:
+                print(f"🆘 NEVER-FAIL mode: serving old cache for {key}")
+                return stale_data
         
+        # 5. Vraiment rien disponible
         return None
     
     def fetch_coinpaprika_markets(self):

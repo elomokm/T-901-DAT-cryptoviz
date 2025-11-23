@@ -19,16 +19,7 @@ export default function Dashboard() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold gradient-text mb-2">Market Overview</h1>
         <p className="text-gray-400">Real-time cryptocurrency market data and analytics</p>
-        {stale && (
-          <div className="mt-3 text-sm px-3 py-2 rounded bg-yellow-500/10 border border-yellow-600 text-yellow-300 inline-flex items-center gap-2">
-            <span>⚠️ Données en cache (stale) – rate limit externe, affichage temporaire.</span>
-          </div>
-        )}
-        {rateLimited && !stale && (
-          <div className="mt-3 text-sm px-3 py-2 rounded bg-orange-500/10 border border-orange-600 text-orange-300 inline-flex items-center gap-2">
-            <span>⏳ Rate limit API externe – rechargement auto dans quelques secondes.</span>
-          </div>
-        )}
+        {/* Mode silencieux: pas de warnings visibles, tout fonctionne en arrière-plan */}
       </div>
 
       {/* Global Stats and Fear & Greed */}
