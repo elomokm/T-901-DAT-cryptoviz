@@ -1,0 +1,41 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Spark
+checkpoints/
+spark-warehouse/
+derby.log
+metastore_db/
+
+# Environment variables (SECRETS!)
+.env
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+TROUBLESHOOTING.md
+
+local_doc/
+
+check_influx_data.py
+check_kafka_messages.py
+crypto_data_influx_check.flux

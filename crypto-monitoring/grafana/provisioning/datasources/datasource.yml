@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB-crypto
+    uid: influxdb-crypto
+    type: influxdb
+    access: proxy
+    url: ${INFLUX_URL}
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: ${INFLUX_ORG}
+      defaultBucket: crypto-data
+      tlsSkipVerify: true
+      httpMode: POST
+    secureJsonData:
+      token: ${INFLUX_TOKEN}

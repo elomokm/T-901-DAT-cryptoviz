@@ -1,0 +1,127 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Normalized = 100 (Price USD)",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+      "targets": [
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "A",
+          "queryType": "flux",
+          "query": "prices = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"price_usd\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1m, fn: last, createEmpty: false)\n\nfirsts = prices\n  |> group(columns: [\"crypto\"])\n  |> first()\n  |> rename(columns: {_value: \"first_val\"})\n  |> keep(columns: [\"crypto\", \"first_val\"])\n\njoin(tables: {p: prices, f: firsts}, on: [\"crypto\"])\n  |> map(fn: (r) => ({ r with _value: (if r.first_val == 0.0 then 0.0 else r._value / r.first_val * 100.0), _field: \"norm100\" }))\n  |> keep(columns: [\"_time\", \"_value\", \"crypto\", \"_field\"])\n  |> yield(name: \"norm100\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Dominance (Market Cap %)",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 10},
+      "targets": [
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "A",
+          "queryType": "flux",
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"market_cap\")\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> yield(name: \"market_cap\")"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []},
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "stacking": {"mode": "percent"},
+        "tooltip": {"mode": "multi"}
+      }
+    },
+    {
+      "type": "table",
+      "title": "Top movers 24h",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 20},
+      "targets": [
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "A",
+          "queryType": "flux",
+          "query": "from(bucket: \"crypto-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field =~ /^(price_usd|change_24h|market_cap|volume_24h)$/)\n  |> filter(fn: (r) => r.crypto !~ /^test_/ and r.crypto != \"None\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> last()\n  |> pivot(rowKey: [\"crypto\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"crypto\", \"price_usd\", \"change_24h\", \"volume_24h\", \"market_cap\"])\n  |> sort(columns: [\"change_24h\"], desc: true)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "price_usd"}, "properties": [{"id": "unit", "value": "currencyUSD"}]},
+          {"matcher": {"id": "byName", "options": "market_cap"}, "properties": [{"id": "unit", "value": "currencyUSD"}, {"id": "decimals", "value": 0}]},
+          {"matcher": {"id": "byName", "options": "volume_24h"}, "properties": [{"id": "unit", "value": "short"}, {"id": "decimals", "value": 0}]},
+          {"matcher": {"id": "byName", "options": "change_24h"}, "properties": [{"id": "unit", "value": "percentunit"}]}
+        ]
+      },
+      "options": {"showHeader": true}
+    },
+    {
+      "type": "table",
+      "title": "Correlation vs BTC (30d)",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+      "targets": [
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "ETH",
+          "queryType": "flux",
+          "query": "base = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 30d, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"change_24h\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1h, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n\nbtc = base |> filter(fn: (r) => r.crypto == \"bitcoin\") |> rename(columns: {_value: \"x\"}) |> keep(columns: [\"_time\", \"x\"])\neth = base |> filter(fn: (r) => r.crypto == \"ethereum\") |> rename(columns: {_value: \"y\"}) |> keep(columns: [\"_time\", \"y\"])\n\njoin(tables: {a: btc, b: eth}, on: [\"_time\"])\n  |> reduce(fn: (acc, r) => ({n: acc.n + 1.0, sumx: acc.sumx + r.x, sumy: acc.sumy + r.y, sumx2: acc.sumx2 + r.x*r.x, sumy2: acc.sumy2 + r.y*r.y, sumxy: acc.sumxy + r.x*r.y}), identity: {n: 0.0, sumx: 0.0, sumy: 0.0, sumx2: 0.0, sumy2: 0.0, sumxy: 0.0})\n  |> map(fn: (r) => ({ _time: now(), _value: (r.n * r.sumxy - r.sumx * r.sumy) / sqrt((r.n * r.sumx2 - r.sumx * r.sumx) * (r.n * r.sumy2 - r.sumy * r.sumy)), pair: \"BTC vs ETH\" }))\n  |> keep(columns: [\"_time\", \"_value\", \"pair\"])"
+        },
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "ADA",
+          "queryType": "flux",
+          "query": "base = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 30d, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"change_24h\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1h, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n\nbtc = base |> filter(fn: (r) => r.crypto == \"bitcoin\") |> rename(columns: {_value: \"x\"}) |> keep(columns: [\"_time\", \"x\"])\nada = base |> filter(fn: (r) => r.crypto == \"cardano\") |> rename(columns: {_value: \"y\"}) |> keep(columns: [\"_time\", \"y\"])\n\njoin(tables: {a: btc, b: ada}, on: [\"_time\"])\n  |> reduce(fn: (acc, r) => ({n: acc.n + 1.0, sumx: acc.sumx + r.x, sumy: acc.sumy + r.y, sumx2: acc.sumx2 + r.x*r.x, sumy2: acc.sumy2 + r.y*r.y, sumxy: acc.sumxy + r.x*r.y}), identity: {n: 0.0, sumx: 0.0, sumy: 0.0, sumx2: 0.0, sumy2: 0.0, sumxy: 0.0})\n  |> map(fn: (r) => ({ _time: now(), _value: (r.n * r.sumxy - r.sumx * r.sumy) / sqrt((r.n * r.sumx2 - r.sumx * r.sumx) * (r.n * r.sumy2 - r.sumy * r.sumy)), pair: \"BTC vs ADA\" }))\n  |> keep(columns: [\"_time\", \"_value\", \"pair\"])"
+        },
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "DOT",
+          "queryType": "flux",
+          "query": "base = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 30d, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"change_24h\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1h, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n\nbtc = base |> filter(fn: (r) => r.crypto == \"bitcoin\") |> rename(columns: {_value: \"x\"}) |> keep(columns: [\"_time\", \"x\"])\ndot = base |> filter(fn: (r) => r.crypto == \"polkadot\") |> rename(columns: {_value: \"y\"}) |> keep(columns: [\"_time\", \"y\"])\n\njoin(tables: {a: btc, b: dot}, on: [\"_time\"])\n  |> reduce(fn: (acc, r) => ({n: acc.n + 1.0, sumx: acc.sumx + r.x, sumy: acc.sumy + r.y, sumx2: acc.sumx2 + r.x*r.x, sumy2: acc.sumy2 + r.y*r.y, sumxy: acc.sumxy + r.x*r.y}), identity: {n: 0.0, sumx: 0.0, sumy: 0.0, sumx2: 0.0, sumy2: 0.0, sumxy: 0.0})\n  |> map(fn: (r) => ({ _time: now(), _value: (r.n * r.sumxy - r.sumx * r.sumy) / sqrt((r.n * r.sumx2 - r.sumx * r.sumx) * (r.n * r.sumy2 - r.sumy * r.sumy)), pair: \"BTC vs DOT\" }))\n  |> keep(columns: [\"_time\", \"_value\", \"pair\"])"
+        },
+        {
+          "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+          "refId": "SOL",
+          "queryType": "flux",
+          "query": "base = from(bucket: \"crypto-data\")\n  |> range(start: v.timeRangeStop - 30d, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"crypto_market\")\n  |> filter(fn: (r) => r._field == \"change_24h\")\n  |> filter(fn: (r) => r.crypto =~ /^${crypto:regex}$/)\n  |> aggregateWindow(every: 1h, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n\nbtc = base |> filter(fn: (r) => r.crypto == \"bitcoin\") |> rename(columns: {_value: \"x\"}) |> keep(columns: [\"_time\", \"x\"])\nsol = base |> filter(fn: (r) => r.crypto == \"solana\") |> rename(columns: {_value: \"y\"}) |> keep(columns: [\"_time\", \"y\"])\n\njoin(tables: {a: btc, b: sol}, on: [\"_time\"])\n  |> reduce(fn: (acc, r) => ({n: acc.n + 1.0, sumx: acc.sumx + r.x, sumy: acc.sumy + r.y, sumx2: acc.sumx2 + r.x*r.x, sumy2: acc.sumy2 + r.y*r.y, sumxy: acc.sumxy + r.x*r.y}), identity: {n: 0.0, sumx: 0.0, sumy: 0.0, sumx2: 0.0, sumy2: 0.0, sumxy: 0.0})\n  |> map(fn: (r) => ({ _time: now(), _value: (r.n * r.sumxy - r.sumx * r.sumy) / sqrt((r.n * r.sumx2 - r.sumx * r.sumx) * (r.n * r.sumy2 - r.sumy * r.sumy)), pair: \"BTC vs SOL\" }))\n  |> keep(columns: [\"_time\", \"_value\", \"pair\"])"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+      "transformations": [
+        {"id": "reduce", "options": {"reducers": ["last"], "fields": ""}},
+        {"id": "labelsToFields", "options": {"mode": "rows"}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true}, "renameByName": {"Value": "Correlation", "pair": "Pair"}}}
+      ],
+      "options": {"showHeader": true}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["crypto", "comparisons"],
+  "templating": {
+    "list": [
+      {
+        "name": "crypto",
+        "type": "query",
+        "hide": 0,
+        "datasource": {"type": "influxdb", "uid": "influxdb-crypto"},
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"crypto-data\", tag: \"crypto\", predicate: (r) => r._measurement == \"crypto_market\", start: -90d)",
+        "regex": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
+        "allValue": "^(bitcoin|cardano|ethereum|polkadot|solana)$",
+        "sort": 1
+      }
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timezone": "",
+  "title": "Comparisons",
+  "uid": "crypto-comparisons"
+}

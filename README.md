@@ -1,353 +1,579 @@
-# CryptoViz — README complet
+# CryptoViz - Real-Time Cryptocurrency Monitoring Platform
 
-Dernière mise à jour : août 2025
+> **Big Data Analytics Platform for Cryptocurrency Market Intelligence**
 
-## 1) Vue d’ensemble
+CryptoViz is a comprehensive big data application designed to continuously collect, process, and visualize cryptocurrency market data in real-time. Built using modern big data technologies, it implements the **Producer/Consumer paradigm** to handle high-velocity data streams from multiple sources.
 
-CryptoViz est une application de visualisation crypto en 3 parties :
-
-* **Frontend** : React + Vite (routing, dashboard, pages News & Portfolio).
-* **API** : FastAPI, expose des endpoints pour bougies 1 min (Timescale), top marché, actualités.
-* **Ingestion** : un **scraper** qui récupère des bougies **1 minute** depuis **Coinbase Exchange** (HTTP public) et les insère dans Postgres/Timescale. Il publie aussi le dernier prix sur Redis (Pub/Sub).
-
-L’ensemble est orchestré par **Docker Compose** :
-
-| Service  | Image / Build                             | Port hôte | Rôle                                  |
-| -------- | ----------------------------------------- | --------- | ------------------------------------- |
-| postgres | timescale/timescaledb\:latest-pg16        | 5432      | Stockage TimescaleDB (bougies, news). |
-| redis    | redis:7                                   | 6379      | Cache + Pub/Sub temps réel.           |
-| api      | build `services/api` (FastAPI + Uvicorn)  | 8000      | Endpoints HTTP.                       |
-| web      | build `web` (Vite + React)                | 5173      | Frontend SPA.                         |
-| scraper  | build `services/scraper` (Python + httpx) | —         | Ingestion bougies 1 min Coinbase.     |
-
-### État actuel
-
-* **OK** : Postgres/Timescale en place, table `candles` fonctionnelle (hypertable).
-* **OK** : API endpoints `/market/top`, `/timeseries/candles`, `/news`, `/news/volume` (ce dernier renvoie des données si la vue continue existe).
-* **OK** : Front **Dashboard** connecté à `/market/top` (affiche les symboles pour lesquels des bougies existent).
-* **OK** : **Scraper** opérationnel via Coinbase (contourne les erreurs 451 de Binance en France). Ingestion multi-symboles via variable d’environnement `SYMBOLS`.
-* **Optionnel** : Mode **DISCOVER\_ALL** (découverte auto de toutes les paires USD/USDC/EUR côté scraper). **À implémenter** dans le code si souhaité (le Compose est déjà prêt, voir § 6.3).
-* **À faire** : Page News branchée à l’API, Portfolio (tables users/trades), graphiques de volumes/sentiments, WebSocket côté front.
+![Architecture](https://img.shields.io/badge/Architecture-Microservices-blue)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ---
 
-## 2) Arborescence
+## 📋 Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Key Features](#key-features)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Components](#components)
+- [Data Flow](#data-flow)
+- [Analytics](#analytics)
+- [Deployment](#deployment)
+- [API Documentation](#api-documentation)
+- [Contributing](#contributing)
+
+---
+
+## 🎯 Overview
+
+CryptoViz addresses the need for **real-time cryptocurrency market intelligence** by providing three core capabilities as required by the project specifications:
+
+### 1. **Online Market Data Feed Collectors** (Web Scrapers)
+Continuously collect cryptocurrency data from multiple sources:
+- **CoinGecko API**: Price, volume, market cap for 20 major cryptocurrencies
+- **CoinMarketCap API**: Professional-grade market data for cross-validation
+- **News RSS Feeds**: Real-time crypto news from CoinDesk & CoinTelegraph
+- **Sentiment Data**: Fear & Greed Index for market psychology
+
+### 2. **Online Analytics Builder** (Stream Processing)
+Process collected data in real-time using Apache Spark Structured Streaming:
+- **Price Analytics**: Moving averages, volatility, price ranges
+- **Anomaly Detection**: Volume spikes, rapid price changes, source divergence
+- **Sentiment Analysis**: News sentiment classification (positive/negative/neutral)
+- **Cross-Validation**: Detect price discrepancies between data sources
+
+### 3. **Dynamic Viewer** (Visualization)
+Visualize analytics with temporal dimensions through:
+- **Next.js Web Application**: Modern, responsive cryptocurrency dashboard
+- **Grafana Dashboards**: Real-time operational metrics and comparisons
+- **Temporal Analysis**: Historical charts, trend analysis, time-series exploration
+
+---
+
+## 🏗️ Architecture
+
+CryptoViz implements a **Lambda Architecture** for big data processing, combining real-time stream processing with batch analytics.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     DATA SOURCES                              │
+│  CoinGecko │ CoinMarketCap │ News RSS │ Fear & Greed        │
+└──────┬──────────────┬───────────┬───────────┬────────────────┘
+       │              │           │           │
+       ▼              ▼           ▼           ▼
+┌──────────────────────────────────────────────────────────────┐
+│          MARKET DATA FEED COLLECTORS (Producers)              │
+│  • CoinGeckoAgent     • CoinMarketCapAgent                   │
+│  • NewsScraperAgent   • FearGreedAgent                       │
+│  Implements: Circuit Breaker, Retry Logic, Avro Validation   │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    KAFKA MESSAGE BROKER                       │
+│  Topics:                                                      │
+│  • crypto-prices         • crypto-news                       │
+│  • crypto-market-sentiment                                   │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│           SPARK STREAMING CONSUMERS (Analytics)               │
+│  • consumer_prices.py        (price data ingestion)          │
+│  • consumer_news.py          (news + sentiment analysis)     │
+│  • consumer_analytics.py     (moving avg, volatility)        │
+│  • consumer_anomaly_detection.py (anomaly alerts)            │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│              INFLUXDB (Time-Series Database)                  │
+│  Measurements:                                                │
+│  • crypto_market         • crypto_news                       │
+│  • crypto_analytics      • crypto_anomalies                  │
+└─────────┬─────────────────────────┬──────────────────────────┘
+          │                         │
+          ▼                         ▼
+┌────────────────────┐    ┌────────────────────────────────────┐
+│  GRAFANA           │    │  FASTAPI + NEXT.JS                 │
+│  (Ops Dashboard)   │    │  (User Dashboard)                  │
+│  Port 3000         │    │  API: 8000 / Web: 3001            │
+└────────────────────┘    └────────────────────────────────────┘
+```
+
+---
+
+## ✨ Key Features
+
+### Data Collection
+- ✅ **Multi-Source Aggregation**: CoinGecko, CoinMarketCap, RSS feeds
+- ✅ **Real-Time Streaming**: Sub-minute data freshness
+- ✅ **Schema Validation**: Avro schema enforcement
+- ✅ **Resilience**: Circuit breakers, exponential backoff, retry logic
+- ✅ **Deduplication**: Prevent duplicate data ingestion
+
+### Stream Processing
+- ✅ **Apache Spark Structured Streaming**: Distributed processing
+- ✅ **Stateful Computations**: Moving averages, volatility
+- ✅ **Anomaly Detection**: Real-time alerts on unusual market activity
+- ✅ **Sentiment Analysis**: NLP-based news sentiment classification
+- ✅ **Cross-Validation**: Compare data from multiple sources
+
+### Analytics
+- ✅ **Price Analytics**: Mean, std dev, min/max, volatility %
+- ✅ **Volume Analysis**: 24h volume trends and anomalies
+- ✅ **Market Sentiment**: Fear & Greed Index tracking
+- ✅ **News Sentiment**: Positive/negative/neutral classification
+- ✅ **Anomaly Detection**: Z-score based outlier detection
+
+### Visualization
+- ✅ **Real-Time Dashboards**: Live market data updates
+- ✅ **Temporal Analysis**: Historical price charts (7d, 30d, 90d)
+- ✅ **Global Market Stats**: Total market cap, volume, 24h change
+- ✅ **News Feed**: Latest crypto news with sentiment indicators
+- ✅ **Responsive UI**: Mobile-friendly design
+
+---
+
+## 🛠️ Technology Stack
+
+### Data Collection & Messaging
+- **Python 3.12**: Market data feed collectors
+- **Apache Kafka 7.4.0**: Message streaming platform
+- **Zookeeper 7.4.0**: Kafka coordination
+- **Avro 1.10.2**: Schema validation
+
+### Stream Processing & Storage
+- **Apache Spark 3.4.1**: Distributed stream processing
+- **InfluxDB 2.7**: Time-series database
+- **Grafana 10.0**: Metrics visualization
+
+### Backend & API
+- **FastAPI 0.115.0**: High-performance REST API
+- **Uvicorn 0.30.6**: ASGI server
+- **Pydantic 2.9.2**: Data validation
+
+### Frontend
+- **Next.js 14.2.11**: React framework
+- **TypeScript 5.3.3**: Type-safe JavaScript
+- **Tailwind CSS 3.4.1**: Utility-first CSS
+- **Recharts 2.10.3**: Chart library
+
+### DevOps & Infrastructure
+- **Docker & Docker Compose**: Containerization
+- **Git**: Version control
+
+---
+
+## 📁 Project Structure
 
 ```
 cryptoviz/
-├─ infra/
-│  └─ docker-compose.yml
-├─ services/
-│  ├─ api/
-│  │  ├─ Dockerfile
-│  │  ├─ requirements.txt
-│  │  └─ main.py
-│  └─ scraper/
-│     ├─ Dockerfile
-│     ├─ requirements.txt
-│     └─ main.py
-└─ web/
-   ├─ vite.config.ts
-   ├─ index.html
-   └─ src/
-      ├─ main.tsx
-      ├─ App.tsx
-      └─ pages/
-         ├─ Dashboard.tsx
-         ├─ News.tsx
-         └─ Portfolio.tsx
+├── crypto-monitoring/           # Data pipeline (Producers + Consumers)
+│   ├── agents/                  # Market Data Feed Collectors
+│   │   ├── base_agent.py       # Abstract base class (Producer pattern)
+│   │   ├── coingecko_agent.py  # CoinGecko market data collector
+│   │   ├── coinmarketcap_agent.py
+│   │   ├── news_scraper_agent.py
+│   │   └── fear_greed_agent.py
+│   ├── schemas/
+│   │   └── crypto_price.avsc   # Avro schema (20+ fields)
+│   ├── consumer_prices.py      # Spark consumer for price data
+│   ├── consumer_news.py        # Spark consumer for news (+ sentiment)
+│   ├── consumer_analytics.py   # Advanced analytics consumer
+│   ├── consumer_anomaly_detection.py
+│   ├── docker-compose.yml      # Infrastructure services
+│   ├── grafana/                # Grafana dashboards
+│   └── requirements.txt
+│
+├── crypto-app/                  # Web application
+│   ├── api/                     # FastAPI backend
+│   │   ├── app/
+│   │   │   ├── main.py
+│   │   │   ├── routers/        # API endpoints
+│   │   │   │   ├── coins.py
+│   │   │   │   ├── news.py
+│   │   │   │   ├── global_stats.py
+│   │   │   │   └── fear_greed.py
+│   │   │   └── services/       # Business logic
+│   │   └── Dockerfile
+│   │
+│   └── web/                     # Next.js frontend
+│       ├── app/
+│       │   ├── page.tsx        # Home dashboard
+│       │   └── coin/[id]/      # Coin detail pages
+│       ├── components/
+│       │   ├── CryptoTable.tsx
+│       │   ├── NewsSection.tsx
+│       │   └── GlobalStatsCards.tsx
+│       ├── lib/
+│       │   └── api.ts          # API client
+│       └── Dockerfile
+│
+└── README.md                    # This file
 ```
 
 ---
 
-## 3) Démarrage rapide
+## 🚀 Getting Started
 
-Depuis `infra/` :
+### Prerequisites
+
+- **Docker** & **Docker Compose** (20.10+)
+- **Python 3.12+** (for local development)
+- **Node.js 18+** (for frontend development)
+- **CoinMarketCap API Key** (free tier: https://coinmarketcap.com/api/)
+
+### Quick Start
+
+#### 1. Clone the Repository
 
 ```bash
-# Build & run
-docker compose up -d --build
-
-# Suivre les logs clés
-docker compose logs -f api
-docker compose logs -f scraper
-
-# Frontend
-# Ouvre http://localhost:5173/
+git clone https://github.com/your-org/cryptoviz.git
+cd cryptoviz
 ```
 
-Tests rapides :
+#### 2. Configure Environment
 
 ```bash
-# L’API doit répondre
-curl -sS 'http://localhost:8000/market/top?limit=5' | jq .
+# Create .env file in crypto-monitoring/
+cd crypto-monitoring
+cp .env.example .env
 
-# Données bougies pour un symbole
-curl -sS 'http://localhost:8000/timeseries/candles?symbol=BTCUSDT&tf=1m' | head
-
-# Comptage en base
-docker compose exec postgres psql -U postgres -d cryptoviz -c "select symbol, count(*) from candles group by symbol order by symbol;"
+# Edit .env and add your configuration:
+# - INFLUX_TOKEN (generated on first run)
+# - CMC_API_KEY (from CoinMarketCap)
 ```
 
-**Après redémarrage du PC** :
+#### 3. Start Infrastructure Services
 
 ```bash
-cd infra
-docker compose up -d
+# In crypto-monitoring/
+docker-compose up -d
+
+# Wait for services to be ready (~30 seconds)
+docker-compose ps
 ```
 
----
+This starts:
+- ✅ Zookeeper (port 2181)
+- ✅ Kafka (port 9092)
+- ✅ InfluxDB (port 8086)
+- ✅ Grafana (port 3000)
 
-## 4) Configuration & variables d’environnement
-
-### 4.1 API (FastAPI)
-
-* `POSTGRES_DSN=postgresql://postgres:postgres@postgres:5432/cryptoviz`
-* `REDIS_URL=redis://redis:6379/0`
-* CORS côté FastAPI : autoriser `http://localhost:5173` dans `main.py`.
-
-### 4.2 Frontend (Vite)
-
-* `VITE_API_URL=http://localhost:8000`
-* Volumes dans Compose :
-
-  * `../web:/app:delegated` (pour travailler en live)
-  * `/app/node_modules` (garde les deps du conteneur)
-* `vite.config.ts` : plugin React + `server.hmr.clientPort=5173`.
-
-### 4.3 Scraper (Coinbase)
-
-* **Mode liste** (actuel) : `SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,...`
-
-  * Le code mappe automatiquement `XXXUSDT` → `XXX-USD` (ou `-USDC`/`-EUR` si dispo).
-* **Paramètres de rythme** :
-
-  * `GRANULARITY_SECONDS=60` (bougies 1 minute)
-  * `SLEEP_BETWEEN_SYMBOLS=0.25` (délai entre deux requêtes)
-  * `LOOP_SLEEP=5` (délai entre deux boucles complètes)
-* **Option découverte** (si implémentée dans le code) :
-
-  * `DISCOVER_ALL=1`
-  * `QUOTE_FILTER=USD,USDC` (ajouter `EUR` si souhaité)
-  * `TARGET_RPS=8` (vise ≤ 8 req/s pour rester sous les limites publiques)
-
----
-
-## 5) Modèle de données
-
-### 5.1 Bougies (Timescale)
-
-```sql
-CREATE TABLE IF NOT EXISTS candles (
-  symbol  TEXT NOT NULL,
-  ts      TIMESTAMPTZ NOT NULL,
-  open    NUMERIC NOT NULL,
-  high    NUMERIC NOT NULL,
-  low     NUMERIC NOT NULL,
-  close   NUMERIC NOT NULL,
-  volume  NUMERIC NOT NULL,
-  PRIMARY KEY(symbol, ts)
-);
-SELECT create_hypertable('candles','ts', if_not_exists=>TRUE);
-CREATE INDEX IF NOT EXISTS ix_candles_symbol_ts ON candles(symbol, ts DESC);
-```
-
-* `symbol` : garde le format interne (ex : `BTCUSDT`), même si la pair source est `BTC-USD` côté Coinbase.
-
-### 5.2 Articles d’actualités (optionnel, déjà défini)
-
-```sql
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-CREATE TABLE IF NOT EXISTS news_articles (
-  id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ts        TIMESTAMPTZ NOT NULL,
-  source    TEXT NOT NULL,
-  url       TEXT NOT NULL,
-  url_hash  TEXT GENERATED ALWAYS AS (encode(digest(url, 'sha256'), 'hex')) STORED,
-  title     TEXT,
-  summary   TEXT,
-  content   TEXT,
-  lang      TEXT,
-  symbols   TEXT[] DEFAULT '{}',
-  sentiment REAL,
-  raw       JSONB
-);
-CREATE UNIQUE INDEX IF NOT EXISTS news_articles_url_uniq ON news_articles(url);
-SELECT create_hypertable('news_articles','ts', if_not_exists => TRUE);
-CREATE INDEX IF NOT EXISTS ix_news_articles_ts ON news_articles(ts DESC);
-CREATE INDEX IF NOT EXISTS ix_news_articles_symbols ON news_articles USING GIN(symbols);
-
--- Vue continue (si tu l’utilises)
--- CREATE MATERIALIZED VIEW mv_news_volume_1m WITH (timescaledb.continuous) AS
--- SELECT time_bucket('1 minute', ts) AS bucket, source, COUNT(*)::bigint AS volume
--- FROM news_articles GROUP BY bucket, source;
--- add_continuous_aggregate_policy(...)
-```
-
----
-
-## 6) Endpoints API
-
-### 6.1 `GET /market/top?limit=20`
-
-Renvoie le dernier prix par symbole + variation 24h.
-
-Exemple :
+#### 4. Install Python Dependencies
 
 ```bash
-curl -s 'http://localhost:8000/market/top?limit=10' | jq .
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-> Remarque : la variation 24h nécessite au moins \~24 heures d’historique.
-
-### 6.2 `GET /timeseries/candles?symbol=BTCUSDT&tf=1m&start=...&end=...`
-
-* `tf`: `1m`, `5m`, `15m`, `1h`, `1d` (agrégation via `time_bucket` côté Timescale si tf ≠ `1m`).
-
-### 6.3 `GET /news?symbol=BTC&limit=50`
-
-* Filtre par symbole présent dans `symbols[]` (si `news_articles` alimentée).
-
-### 6.4 `GET /news/volume`
-
-* Lit la vue continue `mv_news_volume_1m` si elle existe (sinon liste vide).
-
-### 6.5 `WS /ws/quotes`
-
-* Redis Pub/Sub : envoie les derniers prix publiés par le scraper (`{"symbol":"BTCUSDT","price":...,"ts":...}`).
-
----
-
-## 7) Frontend
-
-* **Routing** via `react-router-dom` : `/` (Dashboard), `/news`, `/portfolio`.
-* **Icônes** : `lucide-react`.
-* **HMR** : activé via Vite (veille à installer les deps **dans le conteneur** si tu montes le code en volume).
-
-Installation des deps dans le conteneur `web` :
+#### 5. Start Market Data Feed Collectors (Producers)
 
 ```bash
-docker compose exec web sh -lc 'npm i react-router-dom lucide-react && npm i -D @vitejs/plugin-react'
-docker compose restart web
+# Terminal 1: CoinGecko collector (every 60s)
+python run_coingecko_agent.py
+
+# Terminal 2: CoinMarketCap collector (every 120s)
+python run_coinmarketcap_agent.py
+
+# Terminal 3: News scraper (every 300s)
+python run_news_scraper.py
+
+# Terminal 4: Fear & Greed Index (every 300s)
+python run_fear_greed_agent.py
 ```
 
----
-
-## 8) Dépannage (FAQ)
-
-### 8.1 Le front affiche « Failed to fetch »
-
-* Vérifie que l’API répond : `http://localhost:8000/docs`.
-* Assure `VITE_API_URL=http://localhost:8000` (et redémarre `web`).
-* CORS côté FastAPI : autoriser `http://localhost:5173`.
-
-### 8.2 `react-router-dom`/`lucide-react` introuvables
-
-* Installe **dans le conteneur** : `npm i react-router-dom lucide-react` puis redémarre.
-
-### 8.3 Dashboard n’affiche que BTC/ETH
-
-* Normal si le scraper n’ingère que ces symboles. Ajoute des tickers dans `SYMBOLS` **ou** active la découverte (si implémentée).
-
-### 8.4 Binance 451 (France)
-
-* Le scraper utilise **Coinbase** pour éviter le 451. Si tu remets Binance, tu auras à nouveau le blocage légal.
-
-### 8.5 `curl` échoue avec zsh (`no matches found`)
-
-* Cite l’URL : `curl -sS 'http://localhost:8000/market/top?limit=5'`.
-
-### 8.6 HMR ne réagit pas
-
-* Vérifie les volumes, `CHOKIDAR_USEPOLLING=true`, et `vite.config.ts`.
-
----
-
-## 9) Roadmap
-
-### 9.1 Court terme
-
-* Page **News** branchée à `/news` + filtres (symbol, période).
-* Graphiques (Volume actus, Sentiment, Prix) via agrégation Timescale (bucket 1m/5m/1h).
-* WebSocket côté front (affichage prix live via `/ws/quotes`).
-
-### 9.2 Moyen terme
-
-* **Portfolio** : tables `users`, `trades`, endpoints POST/GET, calcul PnL.
-* Fallback variation 24h (ex : 1h/4h) tant que l’historique n’est pas suffisant.
-* Ingestion actualités (sources publiques), scoring de sentiment (modèle léger), vues continues.
-
-### 9.3 Long terme
-
-* Auth (sessions/JWT), profils utilisateurs.
-* Alerting (seuils prix/volume), backtests simples.
-* Déploiement cloud (compose → Swarm/K8s), monitoring (Prometheus/Grafana).
-
----
-
-## 10) Sécurité & bonnes pratiques
-
-* **Secrets** : ne jamais committer de clés/API, mots de passe, DSN sensibles.
-* **Postgres** : changer `postgres/postgres` en prod, restreindre l’exposition du port.
-* **Rate limiting** : respecter les limites publiques Coinbase (viser ≤ 8 req/s), ajouter un backoff 429.
-* **Logs** : ne pas logger de données personnelles.
-
----
-
-## 11) Annexes
-
-### 11.1 Commandes utiles
+#### 6. Start Spark Consumers (Analytics Builders)
 
 ```bash
-# rebuild ciblé
-docker compose build api scraper web
+# Terminal 5: Price data consumer
+python consumer_prices.py
 
-# restart ciblé
-docker compose restart web api scraper
+# Terminal 6: News consumer (with sentiment analysis)
+python consumer_news.py
 
-# inspecter un fichier dans le conteneur web
-docker compose exec web sh -lc 'wc -l /app/src/App.tsx && head -n 5 /app/src/App.tsx'
+# Terminal 7: Analytics consumer
+python consumer_analytics.py
 
-# top 5 symboles par récence
-docker compose exec postgres psql -U postgres -d cryptoviz -c \
-  "select symbol, max(ts) as last from candles group by symbol order by last desc limit 5;"
+# Terminal 8: Anomaly detection consumer
+python consumer_anomaly_detection.py
 ```
+
+#### 7. Start Web Application
+
+```bash
+# Terminal 9: FastAPI backend
+cd crypto-app/api
+uvicorn app.main:app --reload --port 8000
+
+# Terminal 10: Next.js frontend
+cd crypto-app/web
+npm install
+npm run dev
+```
+
+#### 8. Access Dashboards
+
+- **Web App**: http://localhost:3001
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **FastAPI Docs**: http://localhost:8000/docs
+- **InfluxDB UI**: http://localhost:8086
 
 ---
 
-## 12) Licence
+## 🔧 Components
 
-Projet interne/étudiant. Définir une licence si publication.
+### 1. Market Data Feed Collectors (Producers)
 
+#### CoinGeckoAgent
+- **Purpose**: Collect market data for 20 major cryptocurrencies
+- **Frequency**: Every 60 seconds
+- **Data**: Price, market cap, volume, ATH/ATL, supply metrics
+- **Kafka Topic**: `crypto-prices`
 
+#### CoinMarketCapAgent
+- **Purpose**: Professional-grade market data for cross-validation
+- **Frequency**: Every 120 seconds
+- **Data**: Top 20 cryptos by market cap
+- **Kafka Topic**: `crypto-prices`
 
-##### RUN LE PROJET
-# 1. Démarrer Colima (ou lancer Docker Desktop)
-colima start --cpu 4 --memory 8 --arch x86_64
+#### NewsScraperAgent
+- **Purpose**: Scrape cryptocurrency news from RSS feeds
+- **Sources**: CoinDesk, CoinTelegraph
+- **Frequency**: Every 300 seconds (5 minutes)
+- **Kafka Topic**: `crypto-news`
 
-# 2. Vérifier le contexte Docker
-docker context use colima   # ou "default" si Docker Desktop
-docker info
+#### FearGreedAgent
+- **Purpose**: Collect market sentiment index
+- **Source**: Alternative.me API
+- **Frequency**: Every 300 seconds
+- **Kafka Topic**: `crypto-market-sentiment`
 
-# 3. Aller dans le dossier infra du projet
-cd /chemin/vers/projet/infra
+### 2. Stream Processing Consumers (Analytics Builders)
 
-# 4. Builder et lancer
-docker compose up --build
-Backend : http://127.0.0.1:8000
+#### consumer_prices.py
+- Ingests price data from `crypto-prices` topic
+- Writes to InfluxDB measurement: `crypto_market`
+- Fields: 20+ metrics per cryptocurrency
 
-Frontend : http://127.0.0.1:3000
+#### consumer_news.py
+- Ingests news from `crypto-news` topic
+- **Sentiment Analysis**: Keyword-based classification
+- Writes to InfluxDB measurement: `crypto_news`
+- Tags: source, sentiment
 
-Stopper : docker compose down
+#### consumer_analytics.py
+- Calculates advanced metrics:
+  - Moving averages (approximation over window)
+  - Volatility (standard deviation %)
+  - Price ranges (min/max)
+  - Volume statistics
+- Writes to InfluxDB measurement: `crypto_analytics`
 
+#### consumer_anomaly_detection.py
+- Detects real-time anomalies:
+  - **Volume Spikes**: >3σ from mean
+  - **Price Spikes**: >5% change in <1 min
+  - **Source Divergence**: >1% difference between sources
+- Writes to InfluxDB measurement: `crypto_anomalies`
+- Severity levels: critical, high, medium
 
+### 3. Dynamic Viewers
 
+#### Next.js Web Application
+- **Home Dashboard**:
+  - Global market stats (market cap, volume, 24h change)
+  - Latest crypto news with sentiment indicators
+  - Top 100 cryptocurrencies table
+- **Coin Detail Pages**:
+  - Price history charts (7d, 30d)
+  - Detailed metrics (ATH/ATL, supply, etc.)
+  - Sparkline visualizations
 
+#### Grafana Dashboards
+- **Core Metrics**: Real-time price, volume, market cap
+- **Comparisons**: Multi-source data validation
+- **Alerts**: Anomaly notifications
 
+---
 
+## 📊 Data Flow
 
-## Les plus performant 
-## les moins performant
-## Chart Graphique de la plus belle performance de la semaine
+### Producer/Consumer Paradigm
+
+```
+PRODUCERS (Agents)                    CONSUMERS (Spark)
+─────────────────                     ──────────────────
+CoinGecko Agent      ─┐              ┌─→ consumer_prices.py
+CoinMarketCap Agent  ─┼─→ Kafka ────→┼─→ consumer_analytics.py
+News Scraper Agent   ─┼─→ Topics     │   consumer_anomaly_detection.py
+Fear & Greed Agent   ─┘              └─→ consumer_news.py
+                                            │
+                                            ↓
+                                        InfluxDB
+                                            │
+                                       ┌────┴─────┐
+                                       ↓          ↓
+                                   Grafana   Next.js
+```
+
+### Data Pipeline Stages
+
+1. **Collection** (Producers):
+   - Fetch data from external APIs/RSS
+   - Validate against Avro schemas
+   - Send to Kafka topics
+
+2. **Streaming** (Kafka):
+   - Buffer messages
+   - Decouple producers from consumers
+   - Enable horizontal scaling
+
+3. **Processing** (Spark Consumers):
+   - Parse JSON messages
+   - Calculate analytics
+   - Detect anomalies
+   - Analyze sentiment
+
+4. **Storage** (InfluxDB):
+   - Time-series optimized storage
+   - Indexed by tags (crypto_id, source, sentiment)
+   - Retention policies (configurable)
+
+5. **Visualization** (Grafana + Next.js):
+   - Query InfluxDB via Flux
+   - Render real-time charts
+   - Display temporal trends
+
+---
+
+## 📈 Analytics
+
+### Price Analytics
+- **Moving Averages**: Approximation over batch window
+- **Volatility**: Standard deviation as percentage
+- **Price Range**: Min/max within window
+- **Data Quality**: Count of data points per crypto
+
+### Anomaly Detection
+- **Volume Anomalies**: Z-score > 3.0
+- **Price Spikes**: >5% change in <1 minute
+- **Source Divergence**: >1% difference between CoinGecko/CMC
+- **Alerting**: Severity-based notifications (critical/high/medium)
+
+### Sentiment Analysis
+- **News Sentiment**: Keyword-based classification
+  - **Positive**: surge, rally, bullish, adoption, etc.
+  - **Negative**: crash, drop, hack, ban, etc.
+  - **Neutral**: No strong sentiment
+- **Sentiment Score**: -1.0 (very negative) to +1.0 (very positive)
+- **Applications**: Correlation with price movements
+
+---
+
+## 🐳 Deployment
+
+### Docker Compose (Development)
+
+```bash
+# Start all infrastructure services
+cd crypto-monitoring
+docker-compose up -d
+
+# View logs
+docker-compose logs -f kafka
+docker-compose logs -f influxdb
+
+# Stop services
+docker-compose down
+```
+
+### Production Deployment (TODO)
+
+- [ ] Kubernetes manifests
+- [ ] Helm charts
+- [ ] CI/CD pipeline (GitHub Actions)
+- [ ] Monitoring (Prometheus + AlertManager)
+- [ ] Secrets management (Vault)
+
+---
+
+## 📚 API Documentation
+
+### FastAPI Endpoints
+
+**Base URL**: `http://localhost:8000`
+
+#### Health Checks
+- `GET /health` - API health status
+- `GET /health/influx` - InfluxDB connection test
+
+#### Coins
+- `GET /coins?limit=50&page=1` - List cryptocurrencies
+- `GET /coins/{crypto_id}` - Get specific coin details
+- `GET /coins/{crypto_id}/history?days=7&interval=1h` - Historical data
+
+#### Global Stats
+- `GET /global` - Global market statistics
+
+#### News
+- `GET /news?limit=20&source=coindesk&hours=24` - Latest news
+- `GET /news/sources` - List news sources
+
+#### Sentiment
+- `GET /fear-greed` - Fear & Greed Index
+
+**Interactive Docs**: http://localhost:8000/docs
+
+---
+
+## 🤝 Contributing
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+### Code Style
+
+- **Python**: PEP 8, type hints, docstrings
+- **TypeScript**: ESLint, Prettier
+- **Commits**: Conventional Commits format
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **CoinGecko** - Free cryptocurrency API
+- **CoinMarketCap** - Professional market data
+- **Alternative.me** - Fear & Greed Index
+- **CoinDesk & CoinTelegraph** - Crypto news sources
+
+---
+
+## 📞 Contact
+
+**Project Team**: T-DAT-901 Epitech
+
+**Repository**: https://github.com/your-org/cryptoviz
+
+---
+
+**Built with ❤️ for the cryptocurrency community**
